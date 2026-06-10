@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Complex Trait Mouse Natural Selection Game</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      background: white;
+      color: black;
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    label {
+      display: block;
+      margin: 6px 0;
+    }
+
+    button {
+      background: white;
+      color: black;
+      border: 1px solid black;
+      padding: 6px 12px;
+      margin: 4px;
+      cursor: pointer;
+    }
+
+    #timerDisplay {
+      font-size: 36px;
+      font-weight: bold;
+      margin: 12px 0;
+    }
+
+    #game {
+      width: min(95vw, 900px);
+      aspect-ratio: 7 / 4;
+      border: 2px solid black;
+      position: relative;
+      overflow: hidden;
+      background: #faf8f2;
+    }
+
+    #duneBackground {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .prey {
+      width: 34px;
+      height: 22px;
+      position: absolute;
+      cursor: pointer;
+      z-index: 5;
+    }
+
+    .mouse-svg {
+      width: 34px;
+      height: 22px;
+      pointer-events: none;
+    }
+
+    #timeUpOverlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      font-size: 64px;
+      font-weight: bold;
+      background: rgba(255, 255, 255, 0.65);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    #startOverlayButton {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 11;
+      background: white;
+      color: black;
+      border: 2px solid black;
+      padding: 12px 24px;
+      font-size: 22px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #nextGenOverlayButton {
+      display: none;
+      position: absolute;
+      top: 58%;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 11;
+      background: white;
+      color: black;
+      border: 2px solid black;
+      padding: 10px 18px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    canvas {
+      max-width: 700px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Complex Trait Predator-Prey Natural Selection Game</h1>
+  <p>Each trait is controlled by 5 loci with 2 alleles per locus. Dark allele and slow allele starting frequencies can be adjusted. Default frequency is 0.5. Phenotypes are additive.</p>
+
+  <div id="controls">
+    <label>
+      Student ID:
+      <input id="studentIdInput" type="text" placeholder="Enter student ID">
+    </label>
+
+    <label>
+      Population size:
+      <input id="popSizeInput" type="number" value="50" min="5" max="200">
+    </label>
+
+    <label>
+      Hunt time:
+      <input id="huntTimeInput" type="number" value="10" min="3" max="60">
+    </label>
+
+    <label>
+      Initial dark allele frequency:
+      <input id="darkFreqInput" type="range" value="0.5" min="0" max="1" step="0.05" oninput="document.getElementById('darkFreqValue').textContent = this.value">
+      <span id="darkFreqValue">0.5</span>
+    </label>
+
+    <label>
+      Initial slow allele frequency:
+      <input id="slowFreqInput" type="range" value="0.5" min="0" max="1" step="0.05" oninput="document.getElementById('slowFreqValue').textContent = this.value">
+      <span id="slowFreqValue">0.5</span>
+    </label>
+
+    <label>
+      Mutation rate per allele:
+      <input id="mutationInput" type="range" value="0" min="0" max="0.000001" step="0.00000001" oninput="document.getElementById('mutationValue').textContent = Number(this.value).toExponential(2)">
+      <span id="mutationValue">0.00e+0</span>
+    </label>
+
+    <label>
+      Habitat:
+      <select id="habitatInput">
+        <option value="white_dunes">White dunes</option>
+        <option value="dark_lava">Dark lava</option>
+        <option value="mixed_substrate">Mixed substrate</option>
+      </select>
+    </label>
+
+    <button onclick="resetGame()">Reset Parameters</button>
+    <button id="graphButton" onclick="showGraphs()" style="display:none;">Show Graphs</button>
+  </div>
+
+  <button id="settingsButton" onclick="toggleControls()">Settings</button>
+  <button id="classSummaryButton" onclick="showClassSummaryGraphs()">Class Summary Graphs</button>
+
+  <div id="timerDisplay">Time: 10</div>
+  <p id="stats"></p>
+
+  <div id="game">
+    <div id="timeUpOverlay">TIME'S UP!</div>
+    <button id="startOverlayButton" onclick="startGame()">START</button>
+  </div>
+
+  <div id="graphs" style="display:none;">
+    <h2>Complex Trait Graphs</h2>
+    <canvas id="colorAlleleChart"></canvas>
+    <canvas id="colorPhenotypeChart"></canvas>
+    <canvas id="speedAlleleChart"></canvas>
+    <canvas id="speedPhenotypeChart"></canvas>
+    <canvas id="mutationChart"></canvas>
+
+    <h2>Class Summary Phenotype Graphs</h2>
+
+    <label>
+      Phenotype:
+      <select id="classPhenotypeVariable">
+        <option value="colorPhenotype">Color phenotype: total dark alleles</option>
+        <option value="speedPhenotype">Speed phenotype: total slow alleles</option>
+      </select>
+    </label>
+    <label>
+      Starting population:
+      <input id="classFilterPopulationSize" type="number" value="50">
+    </label>
+
+    <label>
+      Starting dark allele frequency:
+      <input id="classFilterDarkFreq" type="number" value="0.5" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      Starting slow allele frequency:
+      <input id="classFilterSlowFreq" type="number" value="0.5" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      Hunt time:
+      <input id="classFilterHuntTime" type="number" value="10">
+    </label>
+
+    <label>
+      Mutation rate:
+      <input id="classFilterMutationRate" type="number" value="0" step="0.00000001">
+    </label>
+
+    <label>
+      Habitat:
+      <select id="classFilterHabitat">
+        <option value="white_dunes">White dunes</option>
+        <option value="dark_lava">Dark lava</option>
+        <option value="mixed_substrate">Mixed substrate</option>
+      </select>
+    </label>
+    <button onclick="makeClassPhenotypeSummaryGraph()">
+      Create Class Phenotype Summary Graph
+    </button>
+
+    <canvas id="classPhenotypeSummaryChart"></canvas>
+  </div>
+
+  <script>
+    const game = document.getElementById("game");
+    const stats = document.getElementById("stats");
+    const timerDisplay = document.getElementById("timerDisplay");
+    const preySize = 34;
+    const colorLoci = ["C1", "C2", "C3", "C4", "C5"];
+    const speedLoci = ["S1", "S2", "S3", "S4", "S5"];
+    let initialDarkAlleleFrequency = 0.5;
+    let initialSlowAlleleFrequency = 0.5;
+    let gameWidth;
+    let gameHeight;
+    let populationSize = 50;
+    let huntTime = 10;
+    let mutationRate = 0;
+    let habitatType = "white_dunes";
+    let prey = [];
+    let generation = 0;
+    let timeLeft = 10;
+    let timer = null;
+    let animation = null;
+    let huntingActive = false;
+    let history = [];
+    let charts = [];
+    let studentId = "";
+    let mutationCounts = {
+      dark_to_light: 0,
+      light_to_dark: 0,
+      slow_to_fast: 0,
+      fast_to_slow: 0
+    };
+    const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwRKGkaXbKKFEoK1IBkpNSMkzsaE1yhqTZRKqrdOePu1wHpKXpCZH51_eaOQ5SYlcX0ew/exec";
+    const CLASS_DATA_CSV_URL =
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vTegqL45t14tuTGKoqNzMmwyNNOtqM0PJjHb1pZqDnGi2GSyLonntmaOVqaOTvS3vmH02mV4rGXr4ay/pub?output=csv";
+    let classSummaryChart = null;
+    let simulationId = "";
+    let currentGenerationSubmitted = false;
+
+    function updateGameDimensions() {
+      gameWidth = game.clientWidth;
+      gameHeight = game.clientHeight;
+    }
+
+    function toggleControls() {
+      const controls = document.getElementById("controls");
+      controls.style.display = controls.style.display === "none" ? "block" : "none";
+    }
+
+    function lockParameters() {
+      document.getElementById("studentIdInput").disabled = true;
+      document.getElementById("popSizeInput").disabled = true;
+      document.getElementById("huntTimeInput").disabled = true;
+      document.getElementById("darkFreqInput").disabled = true;
+      document.getElementById("slowFreqInput").disabled = true;
+      document.getElementById("mutationInput").disabled = true;
+      document.getElementById("habitatInput").disabled = true;
+    }
+
+    function unlockParameters() {
+      document.getElementById("studentIdInput").disabled = false;
+      document.getElementById("popSizeInput").disabled = false;
+      document.getElementById("huntTimeInput").disabled = false;
+      document.getElementById("darkFreqInput").disabled = false;
+      document.getElementById("slowFreqInput").disabled = false;
+      document.getElementById("mutationInput").disabled = false;
+      document.getElementById("habitatInput").disabled = false;
+    }
+
+    function resetGame() {
+      clearInterval(timer);
+      cancelAnimationFrame(animation);
+      huntingActive = false;
+      prey = [];
+      history = [];
+      simulationId = "";
+      currentGenerationSubmitted = false;
+      charts.forEach(chart => chart.destroy());
+      charts = [];
+      mutationCounts = {
+        dark_to_light: 0,
+        light_to_dark: 0,
+        slow_to_fast: 0,
+        fast_to_slow: 0
+      };
+      generation = 0;
+      timeLeft = Number(document.getElementById("huntTimeInput").value);
+      habitatType = document.getElementById("habitatInput").value;
+      unlockParameters();
+      document.getElementById("controls").style.display = "block";
+      document.getElementById("graphs").style.display = "none";
+      document.getElementById("graphButton").style.display = "none";
+      timerDisplay.textContent = `Time: ${timeLeft}`;
+      stats.innerHTML = "";
+      game.innerHTML = `
+        ${habitatBackgroundSVG()}
+        <div id="timeUpOverlay">TIME'S UP!</div>
+        <button id="startOverlayButton" onclick="startGame()">START</button>
+      `;
+    }
+
+    function startGame() {
+      studentId = document.getElementById("studentIdInput").value.trim();
+      if (studentId === "") {
+        alert("Please enter your student ID before starting.");
+        return;
+      }
+      const startButton = document.getElementById("startOverlayButton");
+      if (startButton) startButton.remove();
+      populationSize = Number(document.getElementById("popSizeInput").value);
+      huntTime = Number(document.getElementById("huntTimeInput").value);
+      initialDarkAlleleFrequency = Number(document.getElementById("darkFreqInput").value);
+      initialSlowAlleleFrequency = Number(document.getElementById("slowFreqInput").value);
+      mutationRate = Number(document.getElementById("mutationInput").value);
+      habitatType = document.getElementById("habitatInput").value;
+      lockParameters();
+      generation = 0;
+      prey = [];
+      history = [];
+      simulationId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+      currentGenerationSubmitted = false;
+      clearInterval(timer);
+      cancelAnimationFrame(animation);
+      charts.forEach(chart => chart.destroy());
+      charts = [];
+      document.getElementById("graphs").style.display = "none";
+      document.getElementById("graphButton").style.display = "inline";
+      updateGameDimensions();
+      prey = makeStartingPopulation();
+      recordHistory();
+      drawPrey();
+      startTimer();
+      animate();
+    }
+
+    function makeStartingPopulation() {
+      const population = [];
+      for (let i = 0; i < populationSize; i++) {
+        population.push({
+          colorGenotype: makeComplexGenotype(colorLoci, "D", "d", initialDarkAlleleFrequency),
+          speedGenotype: makeComplexGenotype(speedLoci, "S", "s", initialSlowAlleleFrequency),
+          alive: true,
+          x: Math.random() * (gameWidth - preySize),
+          y: Math.random() * (gameHeight - preySize),
+          dx: Math.random() < 0.5 ? -1 : 1,
+          dy: Math.random() < 0.5 ? -1 : 1,
+          element: null
+        });
+      }
+      return population;
+    }
+
+    function makeComplexGenotype(loci, highAllele, lowAllele, highFrequency) {
+      const genotype = {};
+      loci.forEach(locus => {
+        genotype[locus] = [
+          Math.random() < highFrequency ? highAllele : lowAllele,
+          Math.random() < highFrequency ? highAllele : lowAllele
+        ];
+      });
+      return genotype;
+    }
+
+    function countAlleleSet(genotype, allele) {
+      let count = 0;
+      Object.values(genotype).forEach(pair => {
+        pair.forEach(a => {
+          if (a === allele) count++;
+        });
+      });
+      return count;
+    }
+
+    function darkAlleleCount(animal) {
+      return countAlleleSet(animal.colorGenotype, "D");
+    }
+
+    function slowAlleleCount(animal) {
+      return countAlleleSet(animal.speedGenotype, "S");
+    }
+
+    function darkAlleleFrequency() {
+      const totalDark = prey.reduce((sum, animal) => sum + darkAlleleCount(animal), 0);
+      return totalDark / (prey.length * 10);
+    }
+
+    function slowAlleleFrequency() {
+      const totalSlow = prey.reduce((sum, animal) => sum + slowAlleleCount(animal), 0);
+      return totalSlow / (prey.length * 10);
+    }
+
+    function alleleFrequencyAtLocus(genotypeName, locus, allele) {
+      if (prey.length === 0) return 0;
+      let count = 0;
+      prey.forEach(animal => {
+        animal[genotypeName][locus].forEach(a => {
+          if (a === allele) count++;
+        });
+      });
+      return count / (prey.length * 2);
+    }
+
+    function locusAlleleFrequencies(genotypeName, loci, allele) {
+      const frequencies = {};
+      loci.forEach(locus => {
+        frequencies[locus] = alleleFrequencyAtLocus(genotypeName, locus, allele);
+      });
+      return frequencies;
+    }
+
+    function colorFromDarkAlleles(darkCount) {
+      const t = darkCount / 10;
+      const light = {
+        r: 245,
+        g: 245,
+        b: 245
+      };
+      const dark = {
+        r: 75,
+        g: 48,
+        b: 31
+      };
+      const r = Math.round(light.r + (dark.r - light.r) * t);
+      const g = Math.round(light.g + (dark.g - light.g) * t);
+      const b = Math.round(light.b + (dark.b - light.b) * t);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function speedValue(animal) {
+      const slowCount = slowAlleleCount(animal);
+      const minSpeed = 0.25;
+      const maxSpeed = 1.1;
+      return maxSpeed - (slowCount / 10) * (maxSpeed - minSpeed);
+    }
+
+    function mutateAllele(allele) {
+      if (Math.random() > mutationRate) return allele;
+      if (allele === "D") {
+        mutationCounts.dark_to_light++;
+        return "d";
+      }
+      if (allele === "d") {
+        mutationCounts.light_to_dark++;
+        return "D";
+      }
+      if (allele === "S") {
+        mutationCounts.slow_to_fast++;
+        return "s";
+      }
+      if (allele === "s") {
+        mutationCounts.fast_to_slow++;
+        return "S";
+      }
+      return allele;
+    }
+
+    function makeOffspringComplexGenotype(parent1Genotype, parent2Genotype, loci) {
+      const genotype = {};
+      loci.forEach(locus => {
+        const a1 = mutateAllele(randomChoice(parent1Genotype[locus]));
+        const a2 = mutateAllele(randomChoice(parent2Genotype[locus]));
+        genotype[locus] = [a1, a2];
+      });
+      return genotype;
+    }
+
+    function randomChoice(array) {
+      return array[Math.floor(Math.random() * array.length)];
+    }
+
+    function makeMouseSVG(fillColor, outlineColor, tailColor) {
+      return `
+        <svg class="mouse-svg" viewBox="0 0 80 50">
+          <ellipse cx="38" cy="28" rx="24" ry="13" fill="${fillColor}" stroke="${outlineColor}" stroke-width="2" />
+          <circle cx="24" cy="16" r="7" fill="${fillColor}" stroke="${outlineColor}" stroke-width="2" />
+          <circle cx="16" cy="25" r="2" fill="pink" />
+          <circle cx="21" cy="24" r="1.5" fill="black" />
+          <path d="M60 30 C72 32, 76 38, 80 46" fill="none" stroke="${tailColor}" stroke-width="3" />
+        </svg>
+      `;
+    }
+
+    function habitatBackgroundSVG() {
+      if (habitatType === "dark_lava") {
+        return `
+          <svg id="duneBackground" viewBox="0 0 700 400" preserveAspectRatio="none">
+            <rect width="700" height="400" fill="#4b3621"/>
+            <path d="M -80 80 C 70 25, 210 130, 360 75 S 610 20, 780 95" fill="none" stroke="#7a5230" stroke-width="26" opacity="0.75"/>
+            <path d="M -60 145 C 100 90, 220 185, 380 130 S 620 85, 770 150" fill="none" stroke="#3e2818" stroke-width="16" opacity="0.75"/>
+            <path d="M -90 220 C 75 155, 230 250, 395 200 S 620 145, 790 215" fill="none" stroke="#8b5e34" stroke-width="22" opacity="0.55"/>
+          </svg>`;
+      }
+      if (habitatType === "mixed_substrate") {
+        return `
+          <svg id="duneBackground" viewBox="0 0 700 400" preserveAspectRatio="none">
+            <rect width="700" height="400" fill="#d8c7aa"/>
+            <path d="M -120 80 C 40 10, 160 140, 300 75 S 520 20, 820 110" fill="none" stroke="#f8f2e6" stroke-width="95" opacity="0.9"/>
+            <path d="M -100 210 C 80 130, 210 300, 370 205 S 570 140, 810 250" fill="none" stroke="#5b3a24" stroke-width="105" opacity="0.75"/>
+            <path d="M 20 -60 C 130 80, 60 190, 190 300 S 420 420, 520 250 S 620 90, 760 40" fill="none" stroke="#ffffff" stroke-width="45" opacity="0.55"/>
+          </svg>`;
+      }
+      return `
+        <svg id="duneBackground" viewBox="0 0 700 400" preserveAspectRatio="none">
+          <linearGradient id="sandGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#ffffff"/>
+            <stop offset="50%" stop-color="#fcfaf5"/>
+            <stop offset="100%" stop-color="#ffffff"/>
+          </linearGradient>
+          <rect width="700" height="400" fill="url(#sandGradient)"/>
+          <path d="M -80 80 C 70 25, 210 130, 360 75 S 610 20, 780 95" fill="none" stroke="#e8e1d4" stroke-width="22" opacity="0.45"/>
+          <path d="M -60 135 C 100 90, 220 185, 380 130 S 620 85, 770 150" fill="none" stroke="#ffffff" stroke-width="12" opacity="0.75"/>
+          <path d="M -90 205 C 75 155, 230 250, 395 200 S 620 145, 790 215" fill="none" stroke="#f0e8da" stroke-width="20" opacity="0.38"/>
+        </svg>`;
+    }
+
+    function drawPrey() {
+      game.innerHTML = `
+        ${habitatBackgroundSVG()}
+        <div id="timeUpOverlay">TIME'S UP!</div>
+        <button id="nextGenOverlayButton" onclick="nextGeneration()">Next Generation</button>
+      `;
+      document.getElementById("timeUpOverlay").style.display = "none";
+      document.getElementById("nextGenOverlayButton").style.display = "none";
+      prey.forEach(animal => {
+        if (!animal.alive) return;
+        const dot = document.createElement("div");
+        const dCount = darkAlleleCount(animal);
+        const fillColor = colorFromDarkAlleles(dCount);
+        const outlineColor = dCount >= 5 ? "#2c1d14" : "#d8c4a8";
+        const tailColor = dCount >= 5 ? "#6f5a4d" : "#e6d7c3";
+        dot.className = "prey";
+        dot.innerHTML = makeMouseSVG(fillColor, outlineColor, tailColor);
+        dot.style.left = animal.x + "px";
+        dot.style.top = animal.y + "px";
+        if (animal.dx > 0) dot.style.transform = "scaleX(-1)";
+        dot.onclick = () => {
+          if (!huntingActive) return;
+          animal.alive = false;
+          dot.remove();
+          updateStats();
+        };
+        animal.element = dot;
+        game.appendChild(dot);
+      });
+      updateStats();
+    }
+
+    function animate() {
+      cancelAnimationFrame(animation);
+
+      function move() {
+        prey.forEach(animal => {
+          if (!animal.alive || !animal.element) return;
+          const speed = speedValue(animal);
+          animal.dx += (Math.random() - 0.5) * 0.25;
+          animal.dy += (Math.random() - 0.5) * 0.25;
+          const avoidanceRadius = 25;
+          prey.forEach(other => {
+            if (other === animal || !other.alive) return;
+            const dx = animal.x - other.x;
+            const dy = animal.y - other.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance > 0 && distance < avoidanceRadius) {
+              const push = (avoidanceRadius - distance) / avoidanceRadius;
+              animal.dx += (dx / distance) * push * 0.15;
+              animal.dy += (dy / distance) * push * 0.15;
+            }
+          });
+          const length = Math.sqrt(animal.dx * animal.dx + animal.dy * animal.dy) || 1;
+          animal.dx = animal.dx / length;
+          animal.dy = animal.dy / length;
+          animal.x += animal.dx * speed;
+          animal.y += animal.dy * speed;
+          if (animal.x <= 0 || animal.x >= gameWidth - preySize) animal.dx *= -1;
+          if (animal.y <= 0 || animal.y >= gameHeight - preySize) animal.dy *= -1;
+          animal.x = Math.max(0, Math.min(gameWidth - preySize, animal.x));
+          animal.y = Math.max(0, Math.min(gameHeight - preySize, animal.y));
+          animal.element.style.left = animal.x + "px";
+          animal.element.style.top = animal.y + "px";
+          animal.element.style.transform = animal.dx > 0 ? "scaleX(-1)" : "scaleX(1)";
+        });
+        animation = requestAnimationFrame(move);
+      }
+      move();
+    }
+
+    function startTimer() {
+      clearInterval(timer);
+      timeLeft = huntTime;
+      huntingActive = true;
+      timerDisplay.textContent = `Time: ${timeLeft}`;
+      timer = setInterval(() => {
+        timeLeft--;
+        timerDisplay.textContent = `Time: ${timeLeft}`;
+        if (timeLeft <= 0) {
+          clearInterval(timer);
+          huntingActive = false;
+          submitComplexTraitDataForCurrentGeneration();
+          timerDisplay.textContent = "Time's up! Click Next Generation";
+          document.getElementById("timeUpOverlay").style.display = "flex";
+          document.getElementById("nextGenOverlayButton").style.display = "block";
+        }
+      }, 1000);
+    }
+
+    function locusAlleleCount(genotype, loci, allele) {
+      const counts = {};
+      loci.forEach(locus => {
+        counts[locus] = genotype[locus].filter(a => a === allele).length;
+      });
+      return counts;
+    }
+
+    function submitComplexTraitDataForCurrentGeneration() {
+      if (currentGenerationSubmitted) return;
+      currentGenerationSubmitted = true;
+
+      const rows = prey.map((animal, index) => {
+        const colorCounts = locusAlleleCount(animal.colorGenotype, colorLoci, "D");
+        const speedCounts = locusAlleleCount(animal.speedGenotype, speedLoci, "S");
+        return {
+          mouse: index + 1,
+          survived: animal.alive ? 1 : 0,
+          C1: colorCounts.C1,
+          C2: colorCounts.C2,
+          C3: colorCounts.C3,
+          C4: colorCounts.C4,
+          C5: colorCounts.C5,
+          colorPhenotype: darkAlleleCount(animal),
+          S1: speedCounts.S1,
+          S2: speedCounts.S2,
+          S3: speedCounts.S3,
+          S4: speedCounts.S4,
+          S5: speedCounts.S5,
+          speedPhenotype: slowAlleleCount(animal)
+        };
+      });
+      fetch(GOOGLE_SHEET_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          studentId,
+          simulationId,
+          generation,
+          startPopulationSize: populationSize,
+          startDarkAlleleFrequency: initialDarkAlleleFrequency,
+          startSlowAlleleFrequency: initialSlowAlleleFrequency,
+          huntTime,
+          mutationRate,
+          habitatType,
+          timestamp: new Date().toISOString(),
+          rows
+        })
+      });
+    }
+
+    function nextGeneration() {
+      if (prey.length === 0) {
+        alert("Click Start first.");
+        return;
+      }
+      if (huntingActive) {
+        alert("Wait until the timer finishes.");
+        return;
+      }
+      const survivors = prey.filter(animal => animal.alive);
+      if (survivors.length < 2) {
+        alert("Too few survivors to reproduce. Restart the game.");
+        return;
+      }
+      mutationCounts = {
+        dark_to_light: 0,
+        light_to_dark: 0,
+        slow_to_fast: 0,
+        fast_to_slow: 0
+      };
+      const offspring = [];
+      while (offspring.length < populationSize) {
+        const p1 = randomChoice(survivors);
+        const p2 = randomChoice(survivors);
+        offspring.push({
+          colorGenotype: makeOffspringComplexGenotype(p1.colorGenotype, p2.colorGenotype, colorLoci),
+          speedGenotype: makeOffspringComplexGenotype(p1.speedGenotype, p2.speedGenotype, speedLoci),
+          alive: true,
+          x: Math.random() * (gameWidth - preySize),
+          y: Math.random() * (gameHeight - preySize),
+          dx: Math.random() < 0.5 ? -1 : 1,
+          dy: Math.random() < 0.5 ? -1 : 1,
+          element: null
+        });
+      }
+      prey = offspring;
+      generation++;
+      currentGenerationSubmitted = false;
+      recordHistory();
+      if (document.getElementById("graphs").style.display === "block") showGraphs();
+      drawPrey();
+      startTimer();
+      animate();
+    }
+
+    function meanTraitCount(countFunction) {
+      return prey.reduce((sum, animal) => sum + countFunction(animal), 0) / prey.length;
+    }
+
+    function recordHistory() {
+      history.push({
+        generation,
+        darkAlleleFrequency: darkAlleleFrequency(),
+        slowAlleleFrequency: slowAlleleFrequency(),
+        colorLocusFrequencies: locusAlleleFrequencies("colorGenotype", colorLoci, "D"),
+        speedLocusFrequencies: locusAlleleFrequencies("speedGenotype", speedLoci, "S"),
+        meanDarkAlleles: meanTraitCount(darkAlleleCount),
+        meanSlowAlleles: meanTraitCount(slowAlleleCount),
+        mutations: {
+          ...mutationCounts
+        }
+      });
+    }
+
+    function updateStats() {
+      const alive = prey.filter(x => x.alive).length;
+      const eaten = populationSize - alive;
+      stats.innerHTML = `
+        <strong>Generation ${generation}</strong><br>
+        Habitat: ${habitatType.replace("_", " ")}<br>
+        Eaten: ${eaten} | Survivors: ${alive}<br><br>
+
+        <strong>Complex color trait</strong><br>
+        Mean dark alleles per mouse: ${meanTraitCount(darkAlleleCount).toFixed(2)} / 10<br>
+        Dark allele frequency: ${darkAlleleFrequency().toFixed(3)}<br><br>
+
+        <strong>Complex speed trait</strong><br>
+        Mean slow alleles per mouse: ${meanTraitCount(slowAlleleCount).toFixed(2)} / 10<br>
+        Slow allele frequency: ${slowAlleleFrequency().toFixed(3)}
+      `;
+    }
+
+    function showClassSummaryGraphs() {
+      document.getElementById("graphs").style.display = "block";
+
+      const summaryCanvas = document.getElementById("classPhenotypeSummaryChart");
+      if (summaryCanvas) {
+        summaryCanvas.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+
+    function showGraphs() {
+      document.getElementById("graphs").style.display = "block";
+      charts.forEach(chart => chart.destroy());
+      charts = [];
+      const generations = history.map(h => h.generation);
+      charts.push(makeLocusFrequencyChart(
+        "colorAlleleChart",
+        "Dark Allele Frequency Across 5 Color Loci",
+        generations,
+        colorLoci,
+        "colorLocusFrequencies",
+        "darkAlleleFrequency",
+        "Mean dark allele frequency"
+      ));
+      charts.push(makeChart("colorPhenotypeChart", "Mean Darkness Phenotype", generations, [
+        ["Mean dark alleles", history.map(h => h.meanDarkAlleles)]
+      ], 0, 10, "Mean dark alleles per mouse"));
+      charts.push(makeLocusFrequencyChart(
+        "speedAlleleChart",
+        "Slow Allele Frequency Across 5 Speed Loci",
+        generations,
+        speedLoci,
+        "speedLocusFrequencies",
+        "slowAlleleFrequency",
+        "Mean slow allele frequency"
+      ));
+      charts.push(makeChart("speedPhenotypeChart", "Mean Slowness Phenotype", generations, [
+        ["Mean slow alleles", history.map(h => h.meanSlowAlleles)]
+      ], 0, 10, "Mean slow alleles per mouse"));
+      charts.push(makeMutationChart("mutationChart", "Mutation Counts Per Generation", generations, [
+        ["Dark to light", history.map(h => h.mutations.dark_to_light || 0)],
+        ["Light to dark", history.map(h => h.mutations.light_to_dark || 0)],
+        ["Slow to fast", history.map(h => h.mutations.slow_to_fast || 0)],
+        ["Fast to slow", history.map(h => h.mutations.fast_to_slow || 0)]
+      ]));
+    }
+
+    function alleleFrequencyCI(loci, locusFrequencyProperty) {
+      const means = [];
+      const lowerCI = [];
+      const upperCI = [];
+      history.forEach(h => {
+        const values = loci
+          .map(locus => h[locusFrequencyProperty][locus])
+          .filter(value => !Number.isNaN(Number(value)))
+          .map(Number);
+        if (values.length === 0) {
+          means.push(null);
+          lowerCI.push(null);
+          upperCI.push(null);
+          return;
+        }
+        const n = values.length;
+        const mean = values.reduce((sum, x) => sum + x, 0) / n;
+        const variance = n > 1 ?
+          values.reduce((sum, x) => sum + Math.pow(x - mean, 2), 0) / (n - 1) :
+          0;
+        const sd = Math.sqrt(variance);
+        const se = sd / Math.sqrt(n);
+        const margin = 1.96 * se;
+        means.push(mean);
+        lowerCI.push(Math.max(0, mean - margin));
+        upperCI.push(Math.min(1, mean + margin));
+      });
+      return {
+        means,
+        lowerCI,
+        upperCI
+      };
+    }
+
+    function makeLocusFrequencyChart(canvasId, title, labels, loci, locusFrequencyProperty, meanFrequencyProperty, meanLabel) {
+      const ctx = document.getElementById(canvasId);
+      const ci = alleleFrequencyCI(loci, locusFrequencyProperty);
+      const locusDatasets = loci.map(locus => ({
+        label: locus,
+        data: history.map(h => h[locusFrequencyProperty][locus]),
+        fill: false,
+        tension: 0.2,
+        borderWidth: 1,
+        pointRadius: 0,
+        borderColor: "rgba(0, 80, 225, 0.25)"
+      }));
+      const lowerCIDataset = {
+        label: "95% CI lower",
+        data: ci.lowerCI,
+        fill: false,
+        tension: 0.2,
+        borderWidth: 0,
+        pointRadius: 0,
+        borderColor: "rgba(0, 0, 0, 0)"
+      };
+      const upperCIDataset = {
+        label: "95% CI upper",
+        data: ci.upperCI,
+        fill: "-1",
+        tension: 0.2,
+        borderWidth: 0,
+        pointRadius: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.25)",
+        borderColor: "rgba(0, 0, 0, 0)"
+      };
+      const meanDataset = {
+        label: meanLabel,
+        data: history.map(h => h[meanFrequencyProperty]),
+        fill: false,
+        tension: 0.2,
+        borderWidth: 5,
+        pointRadius: 3,
+        borderColor: "rgba(0, 0, 0, 1)"
+      };
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [...locusDatasets, lowerCIDataset, upperCIDataset, meanDataset]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: title
+            },
+            legend: {
+              display: true,
+              labels: {
+                filter: item => item.text.startsWith("Mean")
+              }
+            }
+          },
+          scales: {
+            y: {
+              min: 0,
+              max: 1,
+              title: {
+                display: true,
+                text: "Allele frequency"
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: "Generation"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function makeChart(canvasId, title, labels, dataSeries, minY, maxY, yTitle) {
+      const ctx = document.getElementById(canvasId);
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: dataSeries.map(series => ({
+            label: series[0],
+            data: series[1],
+            fill: false,
+            tension: 0.2
+          }))
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: title
+            }
+          },
+          scales: {
+            y: {
+              min: minY,
+              max: maxY,
+              title: {
+                display: true,
+                text: yTitle
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: "Generation"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function makeMutationChart(canvasId, title, labels, dataSeries) {
+      const ctx = document.getElementById(canvasId);
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: dataSeries.map(series => ({
+            label: series[0],
+            data: series[1],
+            fill: false,
+            tension: 0.2
+          }))
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: title
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: "Mutation count"
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: "Generation"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function parseCSVLine(line) {
+      const values = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+        if (char === '"' && inQuotes && nextChar === '"') {
+          current += '"';
+          i++;
+        } else if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === "," && !inQuotes) {
+          values.push(current);
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      values.push(current);
+      return values;
+    }
+    async function fetchClassData() {
+      if (!CLASS_DATA_CSV_URL || CLASS_DATA_CSV_URL.includes("PASTE_")) {
+        alert("Paste your published Google Sheet CSV URL into CLASS_DATA_CSV_URL first.");
+        return [];
+      }
+      try {
+        const response = await fetch(CLASS_DATA_CSV_URL);
+        const text = await response.text();
+        const lines = text.trim().split(/\r?\n/);
+        if (lines.length < 2) return [];
+        const headers = parseCSVLine(lines[0]).map(h => h.trim());
+        return lines.slice(1).map(line => {
+          const values = parseCSVLine(line);
+          const row = {};
+          headers.forEach((header, i) => {
+            row[header] = values[i];
+          });
+          return row;
+        });
+      } catch (error) {
+        alert("Could not load class data from the published CSV.");
+        console.error(error);
+        return [];
+      }
+    }
+
+    function mean(values) {
+      return values.reduce((sum, x) => sum + x, 0) / values.length;
+    }
+
+    function ci95(values) {
+      const cleanValues = values.filter(x => x !== null && !Number.isNaN(Number(x))).map(Number);
+      if (cleanValues.length === 0) {
+        return {
+          mean: null,
+          lower: null,
+          upper: null
+        };
+      }
+      const n = cleanValues.length;
+      const m = mean(cleanValues);
+      if (n < 2) {
+        return {
+          mean: m,
+          lower: m,
+          upper: m
+        };
+      }
+      const variance = cleanValues.reduce((sum, x) => sum + Math.pow(x - m, 2), 0) / (n - 1);
+      const se = Math.sqrt(variance) / Math.sqrt(n);
+      const margin = 1.96 * se;
+      return {
+        mean: m,
+        lower: Math.max(0, m - margin),
+        upper: Math.min(10, m + margin)
+      };
+    }
+
+    function sameNumber(value1, value2) {
+      return Math.abs(Number(value1) - Number(value2)) < 1e-12;
+    }
+    async function makeClassPhenotypeSummaryGraph() {
+      const variable = document.getElementById("classPhenotypeVariable").value;
+      const filterPopulationSize = Number(document.getElementById("classFilterPopulationSize").value);
+      const filterDarkFreq = Number(document.getElementById("classFilterDarkFreq").value);
+      const filterSlowFreq = Number(document.getElementById("classFilterSlowFreq").value);
+      const filterHuntTime = Number(document.getElementById("classFilterHuntTime").value);
+      const filterMutationRate = Number(document.getElementById("classFilterMutationRate").value);
+      const filterHabitat = document.getElementById("classFilterHabitat").value;
+      let rows = await fetchClassData();
+      rows = rows.filter(row =>
+        sameNumber(row.startPopulationSize, filterPopulationSize) &&
+        sameNumber(row.startDarkAlleleFrequency, filterDarkFreq) &&
+        sameNumber(row.startSlowAlleleFrequency, filterSlowFreq) &&
+        sameNumber(row.huntTime, filterHuntTime) &&
+        sameNumber(row.mutationRate, filterMutationRate) &&
+        row.habitatType === filterHabitat
+      );
+      if (rows.length === 0) {
+        alert("No class data matched those starting parameters.");
+        return;
+      }
+      const simulations = {};
+      rows.forEach(row => {
+        const sim = row.simulationId;
+        const gen = Number(row.generation);
+        const value = Number(row[variable]);
+        if (!sim || Number.isNaN(gen) || Number.isNaN(value)) return;
+        if (!simulations[sim]) simulations[sim] = {};
+        if (!simulations[sim][gen]) simulations[sim][gen] = [];
+        simulations[sim][gen].push(value);
+      });
+      const generations = [...new Set(rows.map(row => Number(row.generation)))]
+        .filter(g => !Number.isNaN(g))
+        .sort((a, b) => a - b);
+      const simulationDatasets = Object.keys(simulations).map(sim => ({
+        label: sim,
+        data: generations.map(g => {
+          const values = simulations[sim][g] || [];
+          return values.length ? mean(values) : null;
+        }),
+        fill: false,
+        tension: 0.2,
+        borderWidth: 1,
+        pointRadius: 0,
+        borderColor: "rgba(0, 0, 0, 0.25)"
+      }));
+      const meanValues = [];
+      const lowerCI = [];
+      const upperCI = [];
+      generations.forEach(g => {
+        const simMeans = Object.keys(simulations)
+          .map(sim => {
+            const values = simulations[sim][g] || [];
+            return values.length ? mean(values) : null;
+          })
+          .filter(x => x !== null);
+        const summary = ci95(simMeans);
+        meanValues.push(summary.mean);
+        lowerCI.push(summary.lower);
+        upperCI.push(summary.upper);
+      });
+      if (classSummaryChart) {
+        classSummaryChart.destroy();
+      }
+      const ctx = document.getElementById("classPhenotypeSummaryChart");
+      const variableLabel = variable === "colorPhenotype" ? "color phenotype (total dark alleles)" : "speed phenotype (total slow alleles)";
+      classSummaryChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: generations,
+          datasets: [
+            ...simulationDatasets,
+            {
+              label: "95% CI lower",
+              data: lowerCI,
+              fill: false,
+              borderWidth: 0,
+              pointRadius: 0,
+              borderColor: "rgba(0,0,0,0)"
+            },
+            {
+              label: "95% CI upper",
+              data: upperCI,
+              fill: "-1",
+              borderWidth: 0,
+              pointRadius: 0,
+              backgroundColor: "rgba(0,0,0,0.25)",
+              borderColor: "rgba(0,0,0,0)"
+            },
+            {
+              label: "Mean",
+              data: meanValues,
+              fill: false,
+              tension: 0.2,
+              borderWidth: 5,
+              pointRadius: 3,
+              borderColor: "rgba(0,0,0,1)"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: `Class summary of ${variableLabel}: population ${filterPopulationSize}, dark allele frequency ${filterDarkFreq}, slow allele frequency ${filterSlowFreq}, hunt time ${filterHuntTime}, mutation rate ${filterMutationRate}, habitat ${filterHabitat}`
+            },
+            legend: {
+              display: false
+            }
+          },
+          scales: {
+            y: {
+              min: 0,
+              max: 10,
+              title: {
+                display: true,
+                text: "Mean phenotype"
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: "Generation"
+              }
+            }
+          }
+        }
+      });
+    }
+    window.addEventListener("resize", updateGameDimensions);
+    resetGame();
+  </script>
+</body>
+
+</html>
