@@ -797,9 +797,12 @@
         "darkAlleleFrequency",
         "Mean dark allele frequency"
       ));
-      charts.push(makeChart("colorPhenotypeChart", "Mean Darkness Phenotype", generations, [
-        ["Mean dark alleles", history.map(h => h.meanDarkAlleles)]
-      ], 0, 10, "Mean dark alleles per mouse"));
+      charts.push(makePhenotypeHistogramChart(
+        "colorPhenotypeChart",
+        "Current Color Genotype Distribution",
+        "Number of dark alleles (A)",
+        darkAlleleCount
+      ));
       charts.push(makeLocusFrequencyChart(
         "speedAlleleChart",
         "Slow Allele Frequency Across 5 Speed Loci",
@@ -809,15 +812,75 @@
         "slowAlleleFrequency",
         "Mean slow allele frequency"
       ));
-      charts.push(makeChart("speedPhenotypeChart", "Mean Slowness Phenotype", generations, [
-        ["Mean slow alleles", history.map(h => h.meanSlowAlleles)]
-      ], 0, 10, "Mean slow alleles per mouse"));
+      charts.push(makePhenotypeHistogramChart(
+        "speedPhenotypeChart",
+        "Current Speed Genotype Distribution",
+        "Number of slow alleles (B)",
+        slowAlleleCount
+      ));
       charts.push(makeMutationChart("mutationChart", "Mutation Counts Per Generation", generations, [
         ["Dark to light", history.map(h => h.mutations.dark_to_light || 0)],
         ["Light to dark", history.map(h => h.mutations.light_to_dark || 0)],
         ["Slow to fast", history.map(h => h.mutations.slow_to_fast || 0)],
         ["Fast to slow", history.map(h => h.mutations.fast_to_slow || 0)]
       ]));
+    }
+
+    function phenotypeHistogramCounts(countFunction) {
+      const bins = Array(11).fill(0);
+
+      prey.forEach(animal => {
+        const alleleCount = countFunction(animal);
+        if (alleleCount >= 0 && alleleCount <= 10) {
+          bins[alleleCount]++;
+        }
+      });
+
+      return bins;
+    }
+
+    function makePhenotypeHistogramChart(canvasId, title, xTitle, countFunction) {
+      const ctx = document.getElementById(canvasId);
+      const labels = Array.from({ length: 11 }, (_, i) => String(i));
+      const counts = phenotypeHistogramCounts(countFunction);
+
+      return new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Number of mice",
+            data: counts
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: title
+            },
+            legend: {
+              display: false
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: "Number of mice"
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: xTitle
+              }
+            }
+          }
+        }
+      });
     }
 
     function alleleFrequencyCI(loci, locusFrequencyProperty) {
