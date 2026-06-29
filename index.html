@@ -149,6 +149,12 @@
     </label>
 
     <label>
+      Speed multiplier:
+      <input id="speedInput" type="range" value="0.5" min="0.1" max="2" step="0.1" oninput="document.getElementById('speedValueDisplay').textContent = this.value">
+      <span id="speedValueDisplay">0.5</span>
+    </label>
+
+    <label>
       Mutation rate per allele:
       <input id="mutationInput" type="range" value="0" min="0" max="0.001" step="0.00005" oninput="document.getElementById('mutationValue').textContent = Number(this.value).toExponential(2)">
       <span id="mutationValue">0.00e+0</span>
@@ -216,6 +222,11 @@
     </label>
 
     <label>
+      Speed multiplier:
+      <input id="classFilterSpeedMultiplier" type="number" value="0.5" step="0.1">
+    </label>
+
+    <label>
       Mutation rate:
       <input id="classFilterMutationRate" type="number" value="0" step="0.00000001">
     </label>
@@ -249,6 +260,7 @@
     let populationSize = 50;
     let huntTime = 10;
     let mutationRate = 0;
+    let speedMultiplier = 0.5;
     let habitatType = "white_dunes";
     let prey = [];
     let generation = 0;
@@ -288,6 +300,7 @@
       document.getElementById("huntTimeInput").disabled = true;
       document.getElementById("darkFreqInput").disabled = true;
       document.getElementById("slowFreqInput").disabled = true;
+      document.getElementById("speedInput").disabled = true;
       document.getElementById("mutationInput").disabled = true;
       document.getElementById("habitatInput").disabled = true;
     }
@@ -298,6 +311,7 @@
       document.getElementById("huntTimeInput").disabled = false;
       document.getElementById("darkFreqInput").disabled = false;
       document.getElementById("slowFreqInput").disabled = false;
+      document.getElementById("speedInput").disabled = false;
       document.getElementById("mutationInput").disabled = false;
       document.getElementById("habitatInput").disabled = false;
     }
@@ -346,6 +360,7 @@
       huntTime = Number(document.getElementById("huntTimeInput").value);
       initialDarkAlleleFrequency = Number(document.getElementById("darkFreqInput").value);
       initialSlowAlleleFrequency = Number(document.getElementById("slowFreqInput").value);
+      speedMultiplier = Number(document.getElementById("speedInput").value);
       mutationRate = Number(document.getElementById("mutationInput").value);
       habitatType = document.getElementById("habitatInput").value;
       lockParameters();
@@ -465,7 +480,7 @@
       const slowCount = slowAlleleCount(animal);
       const minSpeed = 0.25;
       const maxSpeed = 1.1;
-      return maxSpeed - (slowCount / 10) * (maxSpeed - minSpeed);
+      return (maxSpeed - (slowCount / 10) * (maxSpeed - minSpeed)) * speedMultiplier;
     }
 
     function mutateAllele(allele) {
@@ -684,6 +699,7 @@
           startDarkAlleleFrequency: initialDarkAlleleFrequency,
           startSlowAlleleFrequency: initialSlowAlleleFrequency,
           huntTime,
+          speedMultiplier,
           mutationRate,
           habitatType,
           timestamp: new Date().toISOString(),
@@ -1167,6 +1183,7 @@
       const filterDarkFreq = Number(document.getElementById("classFilterDarkFreq").value);
       const filterSlowFreq = Number(document.getElementById("classFilterSlowFreq").value);
       const filterHuntTime = Number(document.getElementById("classFilterHuntTime").value);
+      const filterSpeedMultiplier = Number(document.getElementById("classFilterSpeedMultiplier").value);
       const filterMutationRate = Number(document.getElementById("classFilterMutationRate").value);
       const filterHabitat = document.getElementById("classFilterHabitat").value;
       let rows = await fetchClassData();
@@ -1175,6 +1192,7 @@
         sameNumber(row.startDarkAlleleFrequency, filterDarkFreq) &&
         sameNumber(row.startSlowAlleleFrequency, filterSlowFreq) &&
         sameNumber(row.huntTime, filterHuntTime) &&
+        sameNumber(row.speedMultiplier, filterSpeedMultiplier) &&
         sameNumber(row.mutationRate, filterMutationRate) &&
         row.habitatType === filterHabitat
       );
@@ -1266,7 +1284,7 @@
           plugins: {
             title: {
               display: true,
-              text: `Class summary of ${variableLabel}: population ${filterPopulationSize}, dark allele frequency ${filterDarkFreq}, slow allele frequency ${filterSlowFreq}, hunt time ${filterHuntTime}, mutation rate ${filterMutationRate}, habitat ${filterHabitat}`
+              text: `Class summary of ${variableLabel}: population ${filterPopulationSize}, dark allele frequency ${filterDarkFreq}, slow allele frequency ${filterSlowFreq}, hunt time ${filterHuntTime}, speed multiplier ${filterSpeedMultiplier}, mutation rate ${filterMutationRate}, habitat ${filterHabitat}`
             },
             legend: {
               display: false
