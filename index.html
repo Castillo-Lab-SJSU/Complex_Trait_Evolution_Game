@@ -150,8 +150,8 @@
 
     <label>
       Speed multiplier:
-      <input id="speedInput" type="range" value="0.5" min="0.1" max="2" step="0.1" oninput="document.getElementById('speedValueDisplay').textContent = this.value">
-      <span id="speedValueDisplay">0.5</span>
+      <input id="speedInput" type="range" value="1" min="1" max="2" step="0.1" oninput="document.getElementById('speedValueDisplay').textContent = Number(this.value).toFixed(1)">
+      <span id="speedValueDisplay">1.0</span>
     </label>
 
     <label>
@@ -223,7 +223,7 @@
 
     <label>
       Speed multiplier:
-      <input id="classFilterSpeedMultiplier" type="number" value="0.5" step="0.1">
+      <input id="classFilterSpeedMultiplier" type="number" value="1" min="1" max="2" step="0.1">
     </label>
 
     <label>
@@ -260,7 +260,7 @@
     let populationSize = 50;
     let huntTime = 10;
     let mutationRate = 0;
-    let speedMultiplier = 0.5;
+    let speedMultiplier = 1;
     let habitatType = "white_dunes";
     let prey = [];
     let generation = 0;
@@ -478,9 +478,11 @@
 
     function speedValue(animal) {
       const slowCount = slowAlleleCount(animal);
-      const minSpeed = 0.25;
-      const maxSpeed = 1.1;
-      return (maxSpeed - (slowCount / 10) * (maxSpeed - minSpeed)) * speedMultiplier;
+
+      // Speed multiplier controls the strength of speed differences:
+      // 1.0 = all mice move at the same speed
+      // 2.0 = mice with 0 slow alleles move twice as fast as mice with 10 slow alleles
+      return 1 + ((10 - slowCount) / 10) * (speedMultiplier - 1);
     }
 
     function mutateAllele(allele) {
