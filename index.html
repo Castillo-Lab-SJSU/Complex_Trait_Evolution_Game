@@ -175,6 +175,68 @@
 
   <button id="settingsButton" onclick="toggleControls()">Settings</button>
   <button id="classSummaryButton" onclick="showClassSummaryGraphs()">Class Summary Graphs</button>
+  <button id="downloadMyDataButton" onclick="toggleDownloadMyDataForm()">Download My Data</button>
+
+  <div id="downloadMyDataPanel" style="display:none; border:1px solid black; padding:12px; margin:10px 0; max-width:700px;">
+    <h2>Download My Data</h2>
+    <p>Enter your student ID and the starting parameters, then load your matching simulations.</p>
+
+    <label>
+      Student ID:
+      <input id="downloadStudentId" type="text" placeholder="Enter student ID">
+    </label>
+
+    <label>
+      Starting population:
+      <input id="downloadPopulationSize" type="number" value="50">
+    </label>
+
+    <label>
+      Starting dark allele frequency:
+      <input id="downloadDarkFrequency" type="number" value="0.5" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      Starting slow allele frequency:
+      <input id="downloadSlowFrequency" type="number" value="0.5" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      Hunt time:
+      <input id="downloadHuntTime" type="number" value="10">
+    </label>
+
+    <label>
+      Speed multiplier:
+      <input id="downloadSpeedMultiplier" type="number" value="1" min="1" max="2" step="0.1">
+    </label>
+
+    <label>
+      Mutation rate:
+      <input id="downloadMutationRate" type="number" value="0" step="0.00000001">
+    </label>
+
+    <label>
+      Habitat:
+      <select id="downloadHabitat">
+        <option value="all">All habitats</option>
+        <option value="white_dunes">White dunes</option>
+        <option value="dark_lava">Dark lava</option>
+        <option value="mixed_substrate">Mixed substrate</option>
+      </select>
+    </label>
+
+    <button onclick="loadMyComplexSimulationOptions()">Load My Simulations</button>
+
+    <label>
+      Simulation:
+      <select id="downloadSimulationSelect">
+        <option value="">Load simulations first</option>
+      </select>
+    </label>
+
+    <button onclick="downloadSelectedComplexSimulationData()">Download Selected Simulation CSV</button>
+  </div>
 
   <div id="timerDisplay">Time: 10</div>
   <p id="stats"></p>
@@ -1311,6 +1373,178 @@
         }
       });
     }
+
+    function formatNumberForFilename(value) {
+      return String(value).replace(".", "");
+    }
+
+    function toggleDownloadMyDataForm() {
+      const panel = document.getElementById("downloadMyDataPanel");
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+
+      if (studentId) {
+        document.getElementById("downloadStudentId").value = studentId;
+      }
+    }
+
+    function getComplexDownloadFilters() {
+      return {
+        studentId: document.getElementById("downloadStudentId").value.trim(),
+        populationSize: Number(document.getElementById("downloadPopulationSize").value),
+        darkFrequency: Number(document.getElementById("downloadDarkFrequency").value),
+        slowFrequency: Number(document.getElementById("downloadSlowFrequency").value),
+        huntTime: Number(document.getElementById("downloadHuntTime").value),
+        speedMultiplier: Number(document.getElementById("downloadSpeedMultiplier").value),
+        mutationRate: Number(document.getElementById("downloadMutationRate").value),
+        habitat: document.getElementById("downloadHabitat").value
+      };
+    }
+
+    function myComplexDataMatchesFilters(row, filters) {
+      if (String(row.studentId).trim() !== filters.studentId) return false;
+      if (filters.habitat !== "all" && row.habitatType !== filters.habitat) return false;
+
+      return (
+        sameNumber(row.startPopulationSize, filters.populationSize) &&
+        sameNumber(row.startDarkAlleleFrequency, filters.darkFrequency) &&
+        sameNumber(row.startSlowAlleleFrequency, filters.slowFrequency) &&
+        sameNumber(row.huntTime, filters.huntTime) &&
+        sameNumber(row.speedMultiplier, filters.speedMultiplier) &&
+        sameNumber(row.mutationRate, filters.mutationRate)
+      );
+    }
+
+    async function loadMyComplexSimulationOptions() {
+      const filters = getComplexDownloadFilters();
+
+      if (!filters.studentId) {
+        alert("Enter your student ID first.");
+        return;
+      }
+
+      const rows = await fetchClassData();
+      const matches = rows.filter(row => myComplexDataMatchesFilters(row, filters));
+      const simulations = [...new Set(matches.map(row => row.simulationId).filter(Boolean))]
+        .sort();
+
+      const select = document.getElementById("downloadSimulationSelect");
+      select.innerHTML = "";
+
+      if (simulations.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No matching simulations found";
+        select.appendChild(option);
+        alert("No simulations matched that student ID and starting parameters.");
+        return;
+      }
+
+      simulations.forEach(sim => {
+        const simRows = matches.filter(row => row.simulationId === sim);
+        const generations = simRows
+          .map(row => Number(row.generation))
+          .filter(g => !Number.isNaN(g));
+        const minGeneration = Math.min(...generations);
+        const maxGeneration = Math.max(...generations);
+
+        const option = document.createElement("option");
+        option.value = sim;
+        option.textContent = `${sim} (${simRows.length} rows, generations ${minGeneration}-${maxGeneration})`;
+        select.appendChild(option);
+      });
+    }
+
+    function csvEscape(value) {
+      if (value === null || value === undefined) return "";
+      const text = String(value);
+      if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+        return '"' + text.replace(/"/g, '""') + '"';
+      }
+      return text;
+    }
+
+    async function downloadSelectedComplexSimulationData() {
+      const filters = getComplexDownloadFilters();
+      const selectedSimulation = document.getElementById("downloadSimulationSelect").value;
+
+      if (!filters.studentId) {
+        alert("Enter your student ID first.");
+        return;
+      }
+
+      if (!selectedSimulation) {
+        alert("Load and select a simulation first.");
+        return;
+      }
+
+      const rows = await fetchClassData();
+      const matches = rows
+        .filter(row => myComplexDataMatchesFilters(row, filters))
+        .filter(row => row.simulationId === selectedSimulation)
+        .sort((a, b) => {
+          const genDiff = Number(a.generation) - Number(b.generation);
+          if (genDiff !== 0) return genDiff;
+          return Number(a.mouse) - Number(b.mouse);
+        });
+
+      if (matches.length === 0) {
+        alert("No data found for that simulation.");
+        return;
+      }
+
+      const headers = [
+        "studentId",
+        "simulationId",
+        "generation",
+        "mouse",
+        "survived",
+        "startPopulationSize",
+        "startDarkAlleleFrequency",
+        "startSlowAlleleFrequency",
+        "huntTime",
+        "speedMultiplier",
+        "mutationRate",
+        "habitatType",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "colorPhenotype",
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "speedPhenotype",
+        "timestamp"
+      ];
+
+      const csv = [
+        headers.join(","),
+        ...matches.map(row => headers.map(header => csvEscape(row[header])).join(","))
+      ].join("\n");
+
+      const filename =
+        `${filters.studentId}_` +
+        `${filters.populationSize}pop_` +
+        `${formatNumberForFilename(filters.darkFrequency)}Darkf_` +
+        `${formatNumberForFilename(filters.slowFrequency)}Slowf_` +
+        `${formatNumberForFilename(filters.speedMultiplier)}Speed_` +
+        `${filters.mutationRate}mutation_` +
+        `${selectedSimulation}.csv`;
+
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = filename;
+      link.click();
+
+      URL.revokeObjectURL(url);
+    }
+
     window.addEventListener("resize", updateGameDimensions);
     resetGame();
   </script>
