@@ -113,6 +113,19 @@
       max-width: 700px;
       margin: 20px 0;
     }
+
+    #predatorResult, #myStatsPanel {
+      border: 1px solid black;
+      padding: 12px;
+      margin: 10px 0;
+      max-width: 700px;
+      background: #fffdf7;
+    }
+
+    #predatorResult {
+      font-size: 22px;
+      font-weight: bold;
+    }
   </style>
 </head>
 
@@ -176,6 +189,24 @@
   <button id="settingsButton" onclick="toggleControls()">Settings</button>
   <button id="classSummaryButton" onclick="showClassSummaryGraphs()">Class Summary Graphs</button>
   <button id="downloadMyDataButton" onclick="toggleDownloadMyDataForm()">Download My Data</button>
+  <button id="myStatsButton" onclick="showMyStats()">My Stats</button>
+
+  <div id="predatorResult" style="display:none;"></div>
+
+  <div id="myStatsPanel" style="display:none;">
+    <h2>My Predator Stats</h2>
+    <label>
+      Student ID:
+      <input id="myStatsStudentId" type="text" placeholder="Enter student ID">
+    </label>
+    <label>
+      Hunt time:
+      <input id="myStatsHuntTime" type="number" value="10">
+    </label>
+    <button onclick="makeMyStats()">Show My Stats</button>
+    <div id="myStatsText"></div>
+    <canvas id="myStatsChart"></canvas>
+  </div>
 
   <div id="downloadMyDataPanel" style="display:none; border:1px solid black; padding:12px; margin:10px 0; max-width:700px;">
     <h2>Download My Data</h2>
@@ -343,8 +374,41 @@
     const CLASS_DATA_CSV_URL =
       "https://docs.google.com/spreadsheets/d/e/2PACX-1vTegqL45t14tuTGKoqNzMmwyNNOtqM0PJjHb1pZqDnGi2GSyLonntmaOVqaOTvS3vmH02mV4rGXr4ay/pub?output=csv";
     let classSummaryChart = null;
+    let myStatsChart = null;
     let simulationId = "";
     let currentGenerationSubmitted = false;
+
+    const myStatsVerticalLinesPlugin = {
+      id: "myStatsVerticalLinesPlugin",
+      afterDatasetsDraw(chart) {
+        const pluginOptions = chart.options.plugins.myStatsLines;
+        if (!pluginOptions) return;
+
+        const { average, highScore } = pluginOptions;
+        const { ctx, chartArea, scales } = chart;
+        const xScale = scales.x;
+
+        function drawVerticalLine(value, color) {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return;
+
+          const x = xScale.getPixelForValue(value);
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(x, chartArea.top);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = color;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        drawVerticalLine(average, "blue");
+        drawVerticalLine(highScore, "red");
+      }
+    };
+
+    Chart.register(myStatsVerticalLinesPlugin);
 
     function updateGameDimensions() {
       gameWidth = game.clientWidth;
@@ -401,6 +465,8 @@
       document.getElementById("controls").style.display = "block";
       document.getElementById("graphs").style.display = "none";
       document.getElementById("graphButton").style.display = "none";
+      const predatorResult = document.getElementById("predatorResult");
+      if (predatorResult) predatorResult.style.display = "none";
       timerDisplay.textContent = `Time: ${timeLeft}`;
       stats.innerHTML = "";
       game.innerHTML = `
@@ -435,6 +501,8 @@
       cancelAnimationFrame(animation);
       charts.forEach(chart => chart.destroy());
       charts = [];
+      const predatorResult = document.getElementById("predatorResult");
+      if (predatorResult) predatorResult.style.display = "none";
       document.getElementById("graphs").style.display = "none";
       document.getElementById("graphButton").style.display = "inline";
       updateGameDimensions();
@@ -710,6 +778,8 @@
           clearInterval(timer);
           huntingActive = false;
           submitComplexTraitDataForCurrentGeneration();
+          const miceEaten = prey.filter(animal => !animal.alive).length;
+          showPredatorRoundResult(miceEaten);
           timerDisplay.textContent = "Time's up! Click Next Generation";
           document.getElementById("timeUpOverlay").style.display = "flex";
           document.getElementById("nextGenOverlayButton").style.display = "block";
@@ -1543,6 +1613,229 @@
       link.click();
 
       URL.revokeObjectURL(url);
+    }
+
+
+    function completedComplexRunRows(rows) {
+      const grouped = {};
+
+      rows.forEach(row => {
+        const sim = row.simulationId;
+        const gen = Number(row.generation);
+        const hunt = Number(row.huntTime);
+        if (!sim || Number.isNaN(gen) || gen < 0 || Number.isNaN(hunt)) return;
+
+        const key = `${sim}__${gen}`;
+        if (!grouped[key]) {
+          grouped[key] = {
+            studentId: String(row.studentId || "").trim(),
+            simulationId: sim,
+            generation: gen,
+            huntTime: hunt,
+            miceEaten: 0,
+            totalRows: 0
+          };
+        }
+
+        const survived = Number(row.survived);
+        if (!Number.isNaN(survived)) {
+          grouped[key].totalRows++;
+          if (survived === 0) grouped[key].miceEaten++;
+        }
+      });
+
+      return Object.values(grouped).filter(row => row.totalRows > 0);
+    }
+
+    function rowsWithHuntTime(rows, selectedHuntTime) {
+      return rows.filter(row => sameNumber(row.huntTime, selectedHuntTime));
+    }
+
+    function topPercentForScore(score, scores) {
+      const cleanScores = scores
+        .map(Number)
+        .filter(x => !Number.isNaN(x));
+
+      if (cleanScores.length === 0) return null;
+
+      const betterThan = cleanScores.filter(x => x <= score).length;
+      const percentile = 100 * betterThan / cleanScores.length;
+      return Math.max(1, Math.round(100 - percentile));
+    }
+
+    function predatorAchievementText(topPercent, isPersonalBest) {
+      const badges = [];
+
+      if (isPersonalBest) badges.push("🎉 New personal best!");
+      if (topPercent !== null && topPercent <= 1) badges.push("👑 Top predator!");
+      else if (topPercent !== null && topPercent <= 10) badges.push("🌟 Elite predator!");
+
+      return badges.length ? `<br>${badges.join("<br>")}` : "";
+    }
+
+    async function showPredatorRoundResult(miceEaten) {
+      const box = document.getElementById("predatorResult");
+      box.style.display = "block";
+      box.innerHTML = `You ate ${miceEaten} mice!<br>Calculating your ranking...`;
+
+      const rows = rowsWithHuntTime(completedComplexRunRows(await fetchClassData()), huntTime);
+      const allScores = rows.map(row => Number(row.miceEaten));
+      const topPercent = topPercentForScore(miceEaten, allScores);
+
+      const myScores = rows
+        .filter(row => String(row.studentId).trim() === studentId)
+        .map(row => Number(row.miceEaten))
+        .filter(x => !Number.isNaN(x));
+
+      const previousBest = myScores.length ? Math.max(...myScores) : -Infinity;
+      const isPersonalBest = miceEaten >= previousBest;
+
+      if (topPercent === null) {
+        box.innerHTML = `You ate ${miceEaten} mice!`;
+        return;
+      }
+
+      box.innerHTML =
+        `You ate ${miceEaten} mice!<br>` +
+        `🏆 That's in the top ${topPercent}% of all simulation runs with the same hunt time!` +
+        predatorAchievementText(topPercent, isPersonalBest);
+    }
+
+    function showMyStats() {
+      const panel = document.getElementById("myStatsPanel");
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+      if (studentId) document.getElementById("myStatsStudentId").value = studentId;
+      document.getElementById("myStatsHuntTime").value = huntTime || Number(document.getElementById("huntTimeInput").value);
+    }
+
+    function makeHistogramCounts(scores) {
+      const maxScore = Math.max(...scores, 0);
+      const bins = Array(maxScore + 1).fill(0);
+      scores.forEach(score => {
+        if (!Number.isNaN(score) && score >= 0) bins[score]++;
+      });
+      return bins;
+    }
+
+    async function makeMyStats() {
+      const id = document.getElementById("myStatsStudentId").value.trim();
+      const selectedHuntTime = Number(document.getElementById("myStatsHuntTime").value);
+      if (!id) {
+        alert("Enter your student ID first.");
+        return;
+      }
+      if (Number.isNaN(selectedHuntTime)) {
+        alert("Enter a valid hunt time.");
+        return;
+      }
+
+      const rows = rowsWithHuntTime(completedComplexRunRows(await fetchClassData()), selectedHuntTime);
+      const allScores = rows
+        .map(row => Number(row.miceEaten))
+        .filter(x => !Number.isNaN(x));
+
+      const myScores = rows
+        .filter(row => String(row.studentId).trim() === id)
+        .map(row => Number(row.miceEaten))
+        .filter(x => !Number.isNaN(x));
+
+      if (allScores.length === 0) {
+        alert("No class score data found for that hunt time yet.");
+        return;
+      }
+
+      if (myScores.length === 0) {
+        alert("No scores found for that student ID at that hunt time.");
+        return;
+      }
+
+      const best = Math.max(...myScores);
+      const average = myScores.reduce((sum, x) => sum + x, 0) / myScores.length;
+      const bestTopPercent = topPercentForScore(best, allScores);
+      const averageTopPercent = topPercentForScore(average, allScores);
+
+      document.getElementById("myStatsText").innerHTML = `
+        <p><strong>Hunt time:</strong> ${selectedHuntTime} seconds</p>
+        <p><strong>Best round:</strong> ${best} mice eaten</p>
+        <p><strong>Average:</strong> ${average.toFixed(2)} mice eaten</p>
+        <p><strong>Best round rank:</strong> top ${bestTopPercent}% of all simulation runs with this hunt time</p>
+        <p><strong>Average rank:</strong> top ${averageTopPercent}% of all simulation runs with this hunt time</p>
+      `;
+
+      const counts = makeHistogramCounts(allScores);
+      const labels = counts.map((_, i) => i);
+
+      if (myStatsChart) myStatsChart.destroy();
+
+      const ctx = document.getElementById("myStatsChart");
+      myStatsChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "All simulation runs",
+              data: counts,
+              backgroundColor: "rgba(0,0,0,0.25)"
+            },
+            {
+              type: "line",
+              label: "My average",
+              data: [],
+              borderColor: "blue",
+              backgroundColor: "blue",
+              borderWidth: 4,
+              pointRadius: 0
+            },
+            {
+              type: "line",
+              label: "My best",
+              data: [],
+              borderColor: "red",
+              backgroundColor: "red",
+              borderWidth: 4,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: `Mice eaten across all simulation runs with ${selectedHuntTime}-second hunt time`
+            },
+            legend: {
+              display: true
+            },
+            myStatsLines: {
+              average,
+              highScore: best
+            }
+          },
+          scales: {
+            x: {
+              type: "linear",
+              min: 0,
+              max: labels.length - 1,
+              ticks: {
+                stepSize: 1
+              },
+              title: {
+                display: true,
+                text: "Mice eaten"
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: "Number of simulation runs"
+              }
+            }
+          }
+        }
+      });
     }
 
     window.addEventListener("resize", updateGameDimensions);
