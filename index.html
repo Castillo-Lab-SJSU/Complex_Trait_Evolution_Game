@@ -1616,6 +1616,39 @@
       return String(value).replace(".", "");
     }
 
+    function simulationStartDisplayLabel(rows) {
+      const explicitStarts = rows
+        .map(row => row.simulationStartTime)
+        .filter(value => value)
+        .map(value => new Date(value))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .sort((a, b) => a - b);
+
+      const generationTimes = rows
+        .map(row => row.timestamp)
+        .filter(value => value)
+        .map(value => new Date(value))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .sort((a, b) => a - b);
+
+      const date = explicitStarts.length
+        ? explicitStarts[0]
+        : generationTimes.length
+          ? generationTimes[0]
+          : null;
+
+      if (!date) return "Unknown start time";
+
+      const day = String(date.getDate()).padStart(2, "0");
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const month = months[date.getMonth()];
+      const year = date.getFullYear();
+      const hour = String(date.getHours()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+
+      return `${day}${month}${year}_${hour}${minute}`;
+    }
+
     function simulationStartFilenamePrefix(rows) {
       // Prefer the exact simulation start time saved with the simulation.
       const explicitStarts = rows
@@ -1721,7 +1754,9 @@
 
         const option = document.createElement("option");
         option.value = sim;
-        option.textContent = `${sim} (${simRows.length} rows, generations ${minGeneration}-${maxGeneration})`;
+        const startLabel = simulationStartDisplayLabel(simRows);
+        option.textContent =
+          `${startLabel} — generations ${minGeneration}-${maxGeneration} (${simRows.length} rows)`;
         select.appendChild(option);
       });
     }
