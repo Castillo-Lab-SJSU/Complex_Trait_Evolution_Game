@@ -449,6 +449,7 @@
     let classSummaryChart = null;
     let myStatsChart = null;
     let simulationId = "";
+    let simulationStartTime = "";
     let currentGenerationSubmitted = false;
 
     const myStatsVerticalLinesPlugin = {
@@ -568,6 +569,7 @@
       prey = [];
       history = [];
       simulationId = "";
+      simulationStartTime = "";
       currentGenerationSubmitted = false;
       charts.forEach(chart => chart.destroy());
       charts = [];
@@ -616,6 +618,7 @@
       prey = [];
       history = [];
       simulationId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+      simulationStartTime = new Date().toISOString();
       currentGenerationSubmitted = false;
       clearInterval(timer);
       cancelAnimationFrame(animation);
@@ -994,6 +997,7 @@
           speedMultiplier,
           mutationRate,
           habitatType,
+          simulationStartTime,
           timestamp: new Date().toISOString(),
           rows
         })
@@ -1613,14 +1617,29 @@
     }
 
     function simulationStartFilenamePrefix(rows) {
-      // Use the earliest timestamp belonging to the selected simulation, so the
-      // downloaded filename identifies when that simulation actually started.
-      const timestamps = rows
-        .map(row => new Date(row.timestamp))
+      // Prefer the exact simulation start time saved with the simulation.
+      const explicitStarts = rows
+        .map(row => row.simulationStartTime)
+        .filter(value => value)
+        .map(value => new Date(value))
         .filter(date => !Number.isNaN(date.getTime()))
         .sort((a, b) => a - b);
 
-      const date = timestamps.length ? timestamps[0] : new Date();
+      // Older records may not contain simulationStartTime, so fall back to
+      // the earliest generation timestamp for that selected simulation.
+      const generationTimes = rows
+        .map(row => row.timestamp)
+        .filter(value => value)
+        .map(value => new Date(value))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .sort((a, b) => a - b);
+
+      const date = explicitStarts.length
+        ? explicitStarts[0]
+        : generationTimes.length
+          ? generationTimes[0]
+          : new Date();
+
       const day = String(date.getDate()).padStart(2, "0");
       const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
       const month = months[date.getMonth()];
@@ -1758,6 +1777,7 @@
         "speedMultiplier",
         "mutationRate",
         "habitatType",
+        "simulationStartTime",
         "C1",
         "C2",
         "C3",
@@ -1778,8 +1798,10 @@
         ...matches.map(row => headers.map(header => csvEscape(row[header])).join(","))
       ].join("\n");
 
+      const timestampPrefix = simulationStartFilenamePrefix(matches);
+
       const filename =
-        simulationStartFilenamePrefix(matches) +
+        `${timestampPrefix}` +
         `${filters.studentId}_` +
         `${filters.populationSize}pop_` +
         `${formatNumberForFilename(filters.darkFrequency)}Darkf_` +
