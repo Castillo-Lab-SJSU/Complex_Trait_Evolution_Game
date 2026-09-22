@@ -1612,6 +1612,25 @@
       return String(value).replace(".", "");
     }
 
+    function simulationStartFilenamePrefix(rows) {
+      // Use the earliest timestamp belonging to the selected simulation, so the
+      // downloaded filename identifies when that simulation actually started.
+      const timestamps = rows
+        .map(row => new Date(row.timestamp))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .sort((a, b) => a - b);
+
+      const date = timestamps.length ? timestamps[0] : new Date();
+      const day = String(date.getDate()).padStart(2, "0");
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const month = months[date.getMonth()];
+      const year = date.getFullYear();
+      const hour = String(date.getHours()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+
+      return `${day}${month}${year}_${hour}${minute}_`;
+    }
+
     function toggleDownloadMyDataForm() {
       const panel = document.getElementById("downloadMyDataPanel");
       panel.style.display = panel.style.display === "none" ? "block" : "none";
@@ -1760,6 +1779,7 @@
       ].join("\n");
 
       const filename =
+        simulationStartFilenamePrefix(matches) +
         `${filters.studentId}_` +
         `${filters.populationSize}pop_` +
         `${formatNumberForFilename(filters.darkFrequency)}Darkf_` +
