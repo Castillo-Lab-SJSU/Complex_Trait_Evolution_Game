@@ -1788,9 +1788,15 @@
       }
 
       const rows = await fetchClassData();
-      const matches = rows
-        .filter(row => myComplexDataMatchesFilters(row, filters))
-        .filter(row => row.simulationId === selectedSimulation);
+
+      // The parameter filters are used to build the simulation dropdown.
+      // Once a simulation is selected, use every row belonging to that
+      // simulationId. Mouse-level rows may leave the repeated parameter
+      // columns blank, so filtering them again by those fields can discard
+      // all of the genotype/phenotype data.
+      const matches = rows.filter(row =>
+        String(row.simulationId || "").trim() === String(selectedSimulation).trim()
+      );
 
       if (matches.length === 0) {
         alert("No data found for that simulation.");
@@ -1817,27 +1823,53 @@
         return times.length ? times[0].toISOString() : "";
       })();
 
+      function normalizedRowValue(row, names) {
+        const normalized = {};
+        Object.keys(row).forEach(key => {
+          const nk = String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+          normalized[nk] = row[key];
+        });
+
+        for (const name of names) {
+          const nk = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+          if (Object.prototype.hasOwnProperty.call(normalized, nk)) {
+            return normalized[nk];
+          }
+        }
+        return undefined;
+      }
+
       const generations = [...new Set(
-        matches.map(row => Number(row.generation))
+        matches.map(row => Number(normalizedRowValue(row, ["generation"])))
       )]
         .filter(g => !Number.isNaN(g))
         .sort((a, b) => a - b);
 
       const summaryRows = generations.map(generation => {
-        const genRows = matches.filter(row => Number(row.generation) === generation);
+        const genRows = matches.filter(row => Number(normalizedRowValue(row, ["generation"])) === generation);
         const first = genRows[0];
 
         // Use rows that actually contain mouse-level data. Do not depend on the
         // "mouse" column being present, because older sheet versions may omit it.
-        const mouseRows = genRows.filter(row =>
-          !Number.isNaN(Number(row.survived)) ||
-          !Number.isNaN(Number(row.colorPhenotype)) ||
-          !Number.isNaN(Number(row.speedPhenotype)) ||
-          !Number.isNaN(Number(row.C1)) ||
-          !Number.isNaN(Number(row.S1))
-        );
+        const mouseRows = genRows.filter(row => {
+          const survived = normalizedRowValue(row, ["survived", "alive"]);
+          const colorPhenotype = normalizedRowValue(row, ["colorPhenotype", "color phenotype"]);
+          const speedPhenotype = normalizedRowValue(row, ["speedPhenotype", "speed phenotype"]);
+          const c1 = normalizedRowValue(row, ["C1"]);
+          const s1 = normalizedRowValue(row, ["S1"]);
+          const mouse = normalizedRowValue(row, ["mouse", "mouseId", "mouse number"]);
 
-        const survivorRows = mouseRows.filter(row => Number(row.survived) === 1);
+          return [survived, colorPhenotype, speedPhenotype, c1, s1, mouse]
+            .some(value =>
+              value !== undefined &&
+              value !== null &&
+              String(value).trim() !== ""
+            );
+        });
+
+        const survivorRows = mouseRows.filter(row =>
+          Number(normalizedRowValue(row, ["survived", "alive"])) === 1
+        );
 
         const totalMice = mouseRows.length;
         const survivors = survivorRows.length;
@@ -1858,12 +1890,24 @@
         // Phenotype fallback: if the explicit phenotype column is unavailable,
         // reconstruct it by summing the five locus counts.
         const phenotypeValue = (row, prefix) => {
-          const phenotypeKey = prefix === "C" ? "colorPhenotype" : "speedPhenotype";
-          const direct = Number(row[phenotypeKey]);
-          if (!Number.isNaN(direct)) return direct;
+          const phenotypeNames = prefix === "C"
+            ? ["colorPhenotype", "color phenotype"]
+            : ["speedPhenotype", "speed phenotype"];
 
-          const loci = [1,2,3,4,5].map(i => Number(row[`${prefix}${i}`]));
-          if (loci.every(v => !Number.isNaN(v))) {
+          const directRaw = normalizedRowValue(row, phenotypeNames);
+          if (directRaw !== undefined && directRaw !== null && String(directRaw).trim() !== "") {
+            const direct = Number(directRaw);
+            if (!Number.isNaN(direct)) return direct;
+          }
+
+          const loci = [1,2,3,4,5].map(i => {
+            const raw = normalizedRowValue(row, [`${prefix}${i}`]);
+            if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+            const value = Number(raw);
+            return Number.isNaN(value) ? null : value;
+          });
+
+          if (loci.every(v => v !== null)) {
             return loci.reduce((sum, v) => sum + v, 0);
           }
           return null;
@@ -1897,7 +1941,7 @@
           survivorMeanSpeedPhenotype === "" ? "" : survivorMeanSpeedPhenotype / 10;
 
         const generationTimestamp = genRows
-          .map(row => row.timestamp)
+          .map(row => normalizedRowValue(row, ["timestamp"]))
           .find(value => value) || "";
 
         return {
