@@ -1423,20 +1423,69 @@
         alert("Paste your published Google Sheet CSV URL into CLASS_DATA_CSV_URL first.");
         return [];
       }
+
       try {
         const response = await fetch(CLASS_DATA_CSV_URL);
         const text = await response.text();
         const lines = text.trim().split(/\r?\n/);
         if (lines.length < 2) return [];
+
         const headers = parseCSVLine(lines[0]).map(h => h.trim());
-        return lines.slice(1).map(line => {
+
+        const rawRows = lines.slice(1).map(line => {
           const values = parseCSVLine(line);
           const row = {};
           headers.forEach((header, i) => {
-            row[header] = values[i];
+            row[header] = values[i] === undefined ? "" : values[i];
           });
           return row;
         });
+
+        // The sheet stores each generation as a metadata/header row followed by
+        // its mouse rows. The mouse rows may leave simulationId, generation,
+        // timestamp, and starting-parameter columns blank. Carry those values
+        // forward so every mouse row is associated with the correct simulation
+        // and generation before filtering or summarizing.
+        const carryFields = [
+          "studentId",
+          "simulationId",
+          "generation",
+          "startPopulationSize",
+          "startDarkAlleleFrequency",
+          "startSlowAlleleFrequency",
+          "huntTime",
+          "speedMultiplier",
+          "mutationRate",
+          "habitatType",
+          "timestamp",
+          "simulationStartTime"
+        ];
+
+        const current = {};
+
+        rawRows.forEach(row => {
+          // A nonblank simulationId marks a new submitted generation block.
+          if (String(row.simulationId || "").trim() !== "") {
+            carryFields.forEach(field => {
+              if (row[field] !== undefined &&
+                  row[field] !== null &&
+                  String(row[field]).trim() !== "") {
+                current[field] = row[field];
+              }
+            });
+          }
+
+          carryFields.forEach(field => {
+            if ((row[field] === undefined ||
+                 row[field] === null ||
+                 String(row[field]).trim() === "") &&
+                current[field] !== undefined) {
+              row[field] = current[field];
+            }
+          });
+        });
+
+        return rawRows;
       } catch (error) {
         alert("Could not load class data from the published CSV.");
         console.error(error);
