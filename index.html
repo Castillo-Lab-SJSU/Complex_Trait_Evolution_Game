@@ -1755,8 +1755,11 @@
         const option = document.createElement("option");
         option.value = sim;
         const startLabel = simulationStartDisplayLabel(simRows);
+        const generationCount = new Set(
+          simRows.map(row => Number(row.generation)).filter(g => !Number.isNaN(g))
+        ).size;
         option.textContent =
-          `${startLabel} — generations ${minGeneration}-${maxGeneration} (${simRows.length} rows)`;
+          `${startLabel} — generations ${minGeneration}-${maxGeneration} (${generationCount} generations)`;
         select.appendChild(option);
       });
     }
@@ -1794,6 +1797,26 @@
         return;
       }
 
+      const simulationStart = (() => {
+        const explicit = matches
+          .map(row => row.simulationStartTime)
+          .filter(Boolean)
+          .map(value => new Date(value))
+          .filter(date => !Number.isNaN(date.getTime()))
+          .sort((a,b) => a-b);
+
+        if (explicit.length) return explicit[0].toISOString();
+
+        const times = matches
+          .map(row => row.timestamp)
+          .filter(Boolean)
+          .map(value => new Date(value))
+          .filter(date => !Number.isNaN(date.getTime()))
+          .sort((a,b) => a-b);
+
+        return times.length ? times[0].toISOString() : "";
+      })();
+
       const generations = [...new Set(
         matches.map(row => Number(row.generation))
       )]
@@ -1802,53 +1825,55 @@
 
       const summaryRows = generations.map(generation => {
         const genRows = matches.filter(row => Number(row.generation) === generation);
-        const first = genRows[0];
 
-        const totalMice = genRows.length;
-        const survivors = genRows.filter(row => Number(row.survived) === 1).length;
+        // Only mouse rows contain the individual phenotype/survival values.
+        const mouseRows = genRows.filter(row =>
+          row.mouse !== undefined &&
+          row.mouse !== null &&
+          String(row.mouse).trim() !== "" &&
+          !Number.isNaN(Number(row.mouse))
+        );
+
+        const first = genRows[0];
+        const totalMice = mouseRows.length;
+
+        const survivors = mouseRows.filter(row => Number(row.survived) === 1).length;
         const miceEaten = totalMice - survivors;
 
+        const numericValues = key => mouseRows
+          .map(row => Number(row[key]))
+          .filter(v => !Number.isNaN(v));
+
         const meanOf = key => {
-          const vals = genRows
-            .map(row => Number(row[key]))
-            .filter(v => !Number.isNaN(v));
+          const vals = numericValues(key);
           return vals.length
             ? vals.reduce((sum, v) => sum + v, 0) / vals.length
             : "";
         };
 
-        const alleleFrequencyFromLocusCount = key => {
-          const vals = genRows
-            .map(row => Number(row[key]))
-            .filter(v => !Number.isNaN(v));
-          return vals.length
-            ? vals.reduce((sum, v) => sum + v, 0) / (2 * vals.length)
-            : "";
-        };
+        const meanColorPhenotype = meanOf("colorPhenotype");
+        const meanSpeedPhenotype = meanOf("speedPhenotype");
 
-        const colorLocusFreqs = ["C1","C2","C3","C4","C5"]
-          .map(alleleFrequencyFromLocusCount);
+        // Each phenotype is the number of focal alleles out of 10 total
+        // allele copies across the five loci, so phenotype mean / 10 is the
+        // corresponding overall allele frequency.
+        const meanDarkAlleleFrequency =
+          meanColorPhenotype === "" ? "" : meanColorPhenotype / 10;
 
-        const speedLocusFreqs = ["S1","S2","S3","S4","S5"]
-          .map(alleleFrequencyFromLocusCount);
+        const meanSlowAlleleFrequency =
+          meanSpeedPhenotype === "" ? "" : meanSpeedPhenotype / 10;
 
-        const validColor = colorLocusFreqs.filter(v => v !== "");
-        const validSpeed = speedLocusFreqs.filter(v => v !== "");
-
-        const meanDarkAlleleFrequency = validColor.length
-          ? validColor.reduce((a,b) => a+b, 0) / validColor.length
-          : "";
-
-        const meanSlowAlleleFrequency = validSpeed.length
-          ? validSpeed.reduce((a,b) => a+b, 0) / validSpeed.length
-          : "";
+        // Use a real generation timestamp if one is present.
+        const generationTimestamp = genRows
+          .map(row => row.timestamp)
+          .find(value => value) || "";
 
         return {
           studentId: first.studentId,
           simulationId: first.simulationId,
           generation,
-          timestamp: first.timestamp || "",
-          simulationStartTime: first.simulationStartTime || "",
+          timestamp: generationTimestamp,
+          simulationStartTime: simulationStart,
           startPopulationSize: first.startPopulationSize,
           startDarkAlleleFrequency: first.startDarkAlleleFrequency,
           startSlowAlleleFrequency: first.startSlowAlleleFrequency,
@@ -1861,18 +1886,8 @@
           miceEaten,
           meanDarkAlleleFrequency,
           meanSlowAlleleFrequency,
-          meanColorPhenotype: meanOf("colorPhenotype"),
-          meanSpeedPhenotype: meanOf("speedPhenotype"),
-          C1_frequency: colorLocusFreqs[0],
-          C2_frequency: colorLocusFreqs[1],
-          C3_frequency: colorLocusFreqs[2],
-          C4_frequency: colorLocusFreqs[3],
-          C5_frequency: colorLocusFreqs[4],
-          S1_frequency: speedLocusFreqs[0],
-          S2_frequency: speedLocusFreqs[1],
-          S3_frequency: speedLocusFreqs[2],
-          S4_frequency: speedLocusFreqs[3],
-          S5_frequency: speedLocusFreqs[4]
+          meanColorPhenotype,
+          meanSpeedPhenotype
         };
       });
 
@@ -1895,17 +1910,7 @@
         "meanDarkAlleleFrequency",
         "meanSlowAlleleFrequency",
         "meanColorPhenotype",
-        "meanSpeedPhenotype",
-        "C1_frequency",
-        "C2_frequency",
-        "C3_frequency",
-        "C4_frequency",
-        "C5_frequency",
-        "S1_frequency",
-        "S2_frequency",
-        "S3_frequency",
-        "S4_frequency",
-        "S5_frequency"
+        "meanSpeedPhenotype"
       ];
 
       const csv = [
