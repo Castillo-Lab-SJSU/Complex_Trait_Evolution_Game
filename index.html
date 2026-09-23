@@ -963,21 +963,31 @@
       const rows = prey.map((animal, index) => {
         const colorCounts = locusAlleleCount(animal.colorGenotype, colorLoci, "D");
         const speedCounts = locusAlleleCount(animal.speedGenotype, speedLoci, "S");
+        const colorPhenotype = darkAlleleCount(animal);
+        const speedPhenotype = slowAlleleCount(animal);
+        const survived = animal.alive ? 1 : 0;
+
         return {
           mouse: index + 1,
-          survived: animal.alive ? 1 : 0,
+          survived,
           C1: colorCounts.C1,
           C2: colorCounts.C2,
           C3: colorCounts.C3,
           C4: colorCounts.C4,
           C5: colorCounts.C5,
-          colorPhenotype: darkAlleleCount(animal),
+          colorPhenotype,
           S1: speedCounts.S1,
           S2: speedCounts.S2,
           S3: speedCounts.S3,
           S4: speedCounts.S4,
           S5: speedCounts.S5,
-          speedPhenotype: slowAlleleCount(animal)
+          speedPhenotype,
+
+          // These contribution columns allow the generation-level summary
+          // sheet to recover the mean phenotype among survivors:
+          // survivor mean = mean(contribution) / mean(survived).
+          survivorColorPhenotypeContribution: survived ? colorPhenotype : 0,
+          survivorSpeedPhenotypeContribution: survived ? speedPhenotype : 0
         };
       });
       fetch(GOOGLE_SHEET_URL, {
@@ -1837,24 +1847,43 @@
       }
 
       const rows = await fetchClassData();
-
-      // The parameter filters are used to build the simulation dropdown.
-      // Once a simulation is selected, use every row belonging to that
-      // simulationId. Mouse-level rows may leave the repeated parameter
-      // columns blank, so filtering them again by those fields can discard
-      // all of the genotype/phenotype data.
-      const matches = rows.filter(row =>
-        String(row.simulationId || "").trim() === String(selectedSimulation).trim()
-      );
+      const matches = rows
+        .filter(row => myComplexDataMatchesFilters(row, filters))
+        .filter(row => String(row.simulationId || "").trim() === String(selectedSimulation).trim())
+        .sort((a,b) => Number(a.generation) - Number(b.generation));
 
       if (matches.length === 0) {
         alert("No data found for that simulation.");
         return;
       }
 
+      function rowValue(row, names) {
+        const entries = Object.keys(row).map(key => ({
+          normalizedKey: String(key).toLowerCase().replace(/[^a-z0-9]/g, ""),
+          value: row[key]
+        }));
+
+        for (const name of names) {
+          const target = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+          const exact = entries.find(entry => entry.normalizedKey === target);
+          if (exact) return exact.value;
+
+          const suffix = entries.find(entry => entry.normalizedKey.endsWith(target));
+          if (suffix) return suffix.value;
+        }
+        return undefined;
+      }
+
+      function numberOrBlank(value) {
+        if (value === undefined || value === null || String(value).trim() === "") return "";
+        const n = Number(value);
+        return Number.isNaN(n) ? "" : n;
+      }
+
       const simulationStart = (() => {
         const explicit = matches
-          .map(row => row.simulationStartTime)
+          .map(row => rowValue(row, ["simulationStartTime"]))
           .filter(Boolean)
           .map(value => new Date(value))
           .filter(date => !Number.isNaN(date.getTime()))
@@ -1863,7 +1892,7 @@
         if (explicit.length) return explicit[0].toISOString();
 
         const times = matches
-          .map(row => row.timestamp)
+          .map(row => rowValue(row, ["timestamp"]))
           .filter(Boolean)
           .map(value => new Date(value))
           .filter(date => !Number.isNaN(date.getTime()))
@@ -1872,159 +1901,110 @@
         return times.length ? times[0].toISOString() : "";
       })();
 
-      function normalizedRowValue(row, names) {
-        const entries = Object.keys(row).map(key => ({
-          key,
-          normalizedKey: String(key).toLowerCase().replace(/[^a-z0-9]/g, ""),
-          value: row[key]
-        }));
+      const summaryRows = matches.map(row => {
+        const startPopulationSize =
+          numberOrBlank(rowValue(row, ["startPopulationSize"]));
 
-        for (const name of names) {
-          const target = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+        // In the published generation-summary sheet, survived is the mean of
+        // the 0/1 mouse-level survival values, i.e. the survival proportion.
+        const survivalProportion =
+          numberOrBlank(rowValue(row, ["survived", "survivalProportion"]));
 
-          // First prefer an exact normalized header match.
-          const exact = entries.find(entry => entry.normalizedKey === target);
-          if (exact) return exact.value;
+        const totalMice = startPopulationSize === "" ? "" : startPopulationSize;
 
-          // Some Apps Script / Sheet exports prefix nested row fields, e.g.
-          // "rows.mouse", "row_C1", or "rows[0].colorPhenotype".
-          // Accept a suffix match so these fields are still recognized.
-          const suffix = entries.find(entry =>
-            entry.normalizedKey.endsWith(target)
+        const survivors =
+          totalMice === "" || survivalProportion === ""
+            ? ""
+            : Math.round(totalMice * survivalProportion);
+
+        const miceEaten =
+          totalMice === "" || survivors === ""
+            ? ""
+            : totalMice - survivors;
+
+        // Existing generation-summary rows already contain the mean phenotype
+        // of the complete starting population.
+        let startMeanColorPhenotype =
+          numberOrBlank(rowValue(row, ["colorPhenotype", "meanColorPhenotype"]));
+
+        let startMeanSpeedPhenotype =
+          numberOrBlank(rowValue(row, ["speedPhenotype", "meanSpeedPhenotype"]));
+
+        // Fallback for older summaries that only contain mean locus counts.
+        if (startMeanColorPhenotype === "") {
+          const loci = [1,2,3,4,5].map(i =>
+            numberOrBlank(rowValue(row, [`C${i}`]))
           );
-          if (suffix) return suffix.value;
+          if (loci.every(v => v !== "")) {
+            startMeanColorPhenotype = loci.reduce((a,b) => a+b, 0);
+          }
         }
 
-        return undefined;
-      }
-
-      const generations = [...new Set(
-        matches.map(row => Number(normalizedRowValue(row, ["generation"])))
-      )]
-        .filter(g => !Number.isNaN(g))
-        .sort((a, b) => a - b);
-
-      const summaryRows = generations.map(generation => {
-        const genRows = matches.filter(row => Number(normalizedRowValue(row, ["generation"])) === generation);
-        const first = genRows[0];
-
-        // Use rows that actually contain mouse-level data. Do not depend on the
-        // "mouse" column being present, because older sheet versions may omit it.
-        const mouseRows = genRows.filter(row => {
-          const candidateValues = [
-            normalizedRowValue(row, ["mouse", "mouseId", "mouse number"]),
-            normalizedRowValue(row, ["survived", "alive"]),
-            normalizedRowValue(row, ["colorPhenotype", "color phenotype"]),
-            normalizedRowValue(row, ["speedPhenotype", "speed phenotype"]),
-            normalizedRowValue(row, ["C1"]),
-            normalizedRowValue(row, ["C2"]),
-            normalizedRowValue(row, ["C3"]),
-            normalizedRowValue(row, ["C4"]),
-            normalizedRowValue(row, ["C5"]),
-            normalizedRowValue(row, ["S1"]),
-            normalizedRowValue(row, ["S2"]),
-            normalizedRowValue(row, ["S3"]),
-            normalizedRowValue(row, ["S4"]),
-            normalizedRowValue(row, ["S5"])
-          ];
-
-          return candidateValues.some(value =>
-            value !== undefined &&
-            value !== null &&
-            String(value).trim() !== ""
+        if (startMeanSpeedPhenotype === "") {
+          const loci = [1,2,3,4,5].map(i =>
+            numberOrBlank(rowValue(row, [`S${i}`]))
           );
-        });
-
-        const survivorRows = mouseRows.filter(row =>
-          Number(normalizedRowValue(row, ["survived", "alive"])) === 1
-        );
-
-        const totalMice = mouseRows.length;
-        const survivors = survivorRows.length;
-        const miceEaten = totalMice - survivors;
-
-        const numericValues = (rowsToUse, key) =>
-          rowsToUse
-            .map(row => Number(row[key]))
-            .filter(v => !Number.isNaN(v));
-
-        const meanOf = (rowsToUse, key) => {
-          const vals = numericValues(rowsToUse, key);
-          return vals.length
-            ? vals.reduce((sum, v) => sum + v, 0) / vals.length
-            : "";
-        };
-
-        // Phenotype fallback: if the explicit phenotype column is unavailable,
-        // reconstruct it by summing the five locus counts.
-        const phenotypeValue = (row, prefix) => {
-          const phenotypeNames = prefix === "C"
-            ? ["colorPhenotype", "color phenotype"]
-            : ["speedPhenotype", "speed phenotype"];
-
-          const directRaw = normalizedRowValue(row, phenotypeNames);
-          if (directRaw !== undefined && directRaw !== null && String(directRaw).trim() !== "") {
-            const direct = Number(directRaw);
-            if (!Number.isNaN(direct)) return direct;
+          if (loci.every(v => v !== "")) {
+            startMeanSpeedPhenotype = loci.reduce((a,b) => a+b, 0);
           }
+        }
 
-          const loci = [1,2,3,4,5].map(i => {
-            const raw = normalizedRowValue(row, [`${prefix}${i}`]);
-            if (raw === undefined || raw === null || String(raw).trim() === "") return null;
-            const value = Number(raw);
-            return Number.isNaN(value) ? null : value;
-          });
+        // For runs created with this updated version, the source data includes
+        // mean survivor-weighted contributions. Dividing by survival proportion
+        // gives the phenotype mean among survivors.
+        const survivorColorContribution =
+          numberOrBlank(rowValue(row, [
+            "survivorColorPhenotypeContribution",
+            "meanSurvivorColorPhenotypeContribution"
+          ]));
 
-          if (loci.every(v => v !== null)) {
-            return loci.reduce((sum, v) => sum + v, 0);
-          }
-          return null;
-        };
+        const survivorSpeedContribution =
+          numberOrBlank(rowValue(row, [
+            "survivorSpeedPhenotypeContribution",
+            "meanSurvivorSpeedPhenotypeContribution"
+          ]));
 
-        const meanPhenotype = (rowsToUse, prefix) => {
-          const vals = rowsToUse
-            .map(row => phenotypeValue(row, prefix))
-            .filter(v => v !== null && !Number.isNaN(v));
-          return vals.length
-            ? vals.reduce((sum, v) => sum + v, 0) / vals.length
+        const survivorMeanColorPhenotype =
+          survivalProportion !== "" &&
+          survivalProportion > 0 &&
+          survivorColorContribution !== ""
+            ? survivorColorContribution / survivalProportion
             : "";
-        };
 
-        const startMeanColorPhenotype = meanPhenotype(mouseRows, "C");
-        const survivorMeanColorPhenotype = meanPhenotype(survivorRows, "C");
-        const startMeanSpeedPhenotype = meanPhenotype(mouseRows, "S");
-        const survivorMeanSpeedPhenotype = meanPhenotype(survivorRows, "S");
+        const survivorMeanSpeedPhenotype =
+          survivalProportion !== "" &&
+          survivalProportion > 0 &&
+          survivorSpeedContribution !== ""
+            ? survivorSpeedContribution / survivalProportion
+            : "";
 
-        // Mean phenotype is the number of focal alleles out of 10 possible
-        // copies, so dividing by 10 gives the corresponding overall allele
-        // frequency. Report both the starting population and the survivors.
         const startDarkAlleleFrequency =
           startMeanColorPhenotype === "" ? "" : startMeanColorPhenotype / 10;
+
         const survivorDarkAlleleFrequency =
           survivorMeanColorPhenotype === "" ? "" : survivorMeanColorPhenotype / 10;
 
         const startSlowAlleleFrequency =
           startMeanSpeedPhenotype === "" ? "" : startMeanSpeedPhenotype / 10;
+
         const survivorSlowAlleleFrequency =
           survivorMeanSpeedPhenotype === "" ? "" : survivorMeanSpeedPhenotype / 10;
 
-        const generationTimestamp = genRows
-          .map(row => normalizedRowValue(row, ["timestamp"]))
-          .find(value => value) || "";
-
         return {
-          studentId: first.studentId,
-          simulationId: first.simulationId,
-          generation,
-          timestamp: generationTimestamp,
+          studentId: rowValue(row, ["studentId"]) || "",
+          simulationId: rowValue(row, ["simulationId"]) || "",
+          generation: numberOrBlank(rowValue(row, ["generation"])),
+          timestamp: rowValue(row, ["timestamp"]) || "",
           simulationStartTime: simulationStart,
-          startPopulationSize: first.startPopulationSize,
-          startDarkAlleleFrequencyParameter: first.startDarkAlleleFrequency,
-          startSlowAlleleFrequencyParameter: first.startSlowAlleleFrequency,
-          huntTime: first.huntTime,
-          speedMultiplier: first.speedMultiplier,
-          mutationRate: first.mutationRate,
-          habitatType: first.habitatType,
+          startPopulationSize,
+          startDarkAlleleFrequencyParameter:
+            numberOrBlank(rowValue(row, ["startDarkAlleleFrequency"])),
+          startSlowAlleleFrequencyParameter:
+            numberOrBlank(rowValue(row, ["startSlowAlleleFrequency"])),
+          huntTime: numberOrBlank(rowValue(row, ["huntTime"])),
+          speedMultiplier: numberOrBlank(rowValue(row, ["speedMultiplier"])),
+          mutationRate: numberOrBlank(rowValue(row, ["mutationRate"])),
+          habitatType: rowValue(row, ["habitatType"]) || "",
           totalMice,
           survivors,
           miceEaten,
