@@ -1873,18 +1873,28 @@
       })();
 
       function normalizedRowValue(row, names) {
-        const normalized = {};
-        Object.keys(row).forEach(key => {
-          const nk = String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
-          normalized[nk] = row[key];
-        });
+        const entries = Object.keys(row).map(key => ({
+          key,
+          normalizedKey: String(key).toLowerCase().replace(/[^a-z0-9]/g, ""),
+          value: row[key]
+        }));
 
         for (const name of names) {
-          const nk = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
-          if (Object.prototype.hasOwnProperty.call(normalized, nk)) {
-            return normalized[nk];
-          }
+          const target = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+          // First prefer an exact normalized header match.
+          const exact = entries.find(entry => entry.normalizedKey === target);
+          if (exact) return exact.value;
+
+          // Some Apps Script / Sheet exports prefix nested row fields, e.g.
+          // "rows.mouse", "row_C1", or "rows[0].colorPhenotype".
+          // Accept a suffix match so these fields are still recognized.
+          const suffix = entries.find(entry =>
+            entry.normalizedKey.endsWith(target)
+          );
+          if (suffix) return suffix.value;
         }
+
         return undefined;
       }
 
@@ -1901,19 +1911,28 @@
         // Use rows that actually contain mouse-level data. Do not depend on the
         // "mouse" column being present, because older sheet versions may omit it.
         const mouseRows = genRows.filter(row => {
-          const survived = normalizedRowValue(row, ["survived", "alive"]);
-          const colorPhenotype = normalizedRowValue(row, ["colorPhenotype", "color phenotype"]);
-          const speedPhenotype = normalizedRowValue(row, ["speedPhenotype", "speed phenotype"]);
-          const c1 = normalizedRowValue(row, ["C1"]);
-          const s1 = normalizedRowValue(row, ["S1"]);
-          const mouse = normalizedRowValue(row, ["mouse", "mouseId", "mouse number"]);
+          const candidateValues = [
+            normalizedRowValue(row, ["mouse", "mouseId", "mouse number"]),
+            normalizedRowValue(row, ["survived", "alive"]),
+            normalizedRowValue(row, ["colorPhenotype", "color phenotype"]),
+            normalizedRowValue(row, ["speedPhenotype", "speed phenotype"]),
+            normalizedRowValue(row, ["C1"]),
+            normalizedRowValue(row, ["C2"]),
+            normalizedRowValue(row, ["C3"]),
+            normalizedRowValue(row, ["C4"]),
+            normalizedRowValue(row, ["C5"]),
+            normalizedRowValue(row, ["S1"]),
+            normalizedRowValue(row, ["S2"]),
+            normalizedRowValue(row, ["S3"]),
+            normalizedRowValue(row, ["S4"]),
+            normalizedRowValue(row, ["S5"])
+          ];
 
-          return [survived, colorPhenotype, speedPhenotype, c1, s1, mouse]
-            .some(value =>
-              value !== undefined &&
-              value !== null &&
-              String(value).trim() !== ""
-            );
+          return candidateValues.some(value =>
+            value !== undefined &&
+            value !== null &&
+            String(value).trim() !== ""
+          );
         });
 
         const survivorRows = mouseRows.filter(row =>
