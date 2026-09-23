@@ -1825,45 +1825,77 @@
 
       const summaryRows = generations.map(generation => {
         const genRows = matches.filter(row => Number(row.generation) === generation);
+        const first = genRows[0];
 
-        // Only mouse rows contain the individual phenotype/survival values.
+        // Use rows that actually contain mouse-level data. Do not depend on the
+        // "mouse" column being present, because older sheet versions may omit it.
         const mouseRows = genRows.filter(row =>
-          row.mouse !== undefined &&
-          row.mouse !== null &&
-          String(row.mouse).trim() !== "" &&
-          !Number.isNaN(Number(row.mouse))
+          !Number.isNaN(Number(row.survived)) ||
+          !Number.isNaN(Number(row.colorPhenotype)) ||
+          !Number.isNaN(Number(row.speedPhenotype)) ||
+          !Number.isNaN(Number(row.C1)) ||
+          !Number.isNaN(Number(row.S1))
         );
 
-        const first = genRows[0];
-        const totalMice = mouseRows.length;
+        const survivorRows = mouseRows.filter(row => Number(row.survived) === 1);
 
-        const survivors = mouseRows.filter(row => Number(row.survived) === 1).length;
+        const totalMice = mouseRows.length;
+        const survivors = survivorRows.length;
         const miceEaten = totalMice - survivors;
 
-        const numericValues = key => mouseRows
-          .map(row => Number(row[key]))
-          .filter(v => !Number.isNaN(v));
+        const numericValues = (rowsToUse, key) =>
+          rowsToUse
+            .map(row => Number(row[key]))
+            .filter(v => !Number.isNaN(v));
 
-        const meanOf = key => {
-          const vals = numericValues(key);
+        const meanOf = (rowsToUse, key) => {
+          const vals = numericValues(rowsToUse, key);
           return vals.length
             ? vals.reduce((sum, v) => sum + v, 0) / vals.length
             : "";
         };
 
-        const meanColorPhenotype = meanOf("colorPhenotype");
-        const meanSpeedPhenotype = meanOf("speedPhenotype");
+        // Phenotype fallback: if the explicit phenotype column is unavailable,
+        // reconstruct it by summing the five locus counts.
+        const phenotypeValue = (row, prefix) => {
+          const phenotypeKey = prefix === "C" ? "colorPhenotype" : "speedPhenotype";
+          const direct = Number(row[phenotypeKey]);
+          if (!Number.isNaN(direct)) return direct;
 
-        // Each phenotype is the number of focal alleles out of 10 total
-        // allele copies across the five loci, so phenotype mean / 10 is the
-        // corresponding overall allele frequency.
-        const meanDarkAlleleFrequency =
-          meanColorPhenotype === "" ? "" : meanColorPhenotype / 10;
+          const loci = [1,2,3,4,5].map(i => Number(row[`${prefix}${i}`]));
+          if (loci.every(v => !Number.isNaN(v))) {
+            return loci.reduce((sum, v) => sum + v, 0);
+          }
+          return null;
+        };
 
-        const meanSlowAlleleFrequency =
-          meanSpeedPhenotype === "" ? "" : meanSpeedPhenotype / 10;
+        const meanPhenotype = (rowsToUse, prefix) => {
+          const vals = rowsToUse
+            .map(row => phenotypeValue(row, prefix))
+            .filter(v => v !== null && !Number.isNaN(v));
+          return vals.length
+            ? vals.reduce((sum, v) => sum + v, 0) / vals.length
+            : "";
+        };
 
-        // Use a real generation timestamp if one is present.
+        const startMeanColorPhenotype = meanPhenotype(mouseRows, "C");
+        const survivorMeanColorPhenotype = meanPhenotype(survivorRows, "C");
+        const startMeanSpeedPhenotype = meanPhenotype(mouseRows, "S");
+        const survivorMeanSpeedPhenotype = meanPhenotype(survivorRows, "S");
+
+        // Mean phenotype is the number of focal alleles out of 10 possible
+        // copies, so dividing by 10 gives the corresponding overall allele
+        // frequency. Report both the starting population and the survivors.
+        const startDarkAlleleFrequency =
+          startMeanColorPhenotype === "" ? "" : startMeanColorPhenotype / 10;
+        const survivorDarkAlleleFrequency =
+          survivorMeanColorPhenotype === "" ? "" : survivorMeanColorPhenotype / 10;
+
+        const startSlowAlleleFrequency =
+          startMeanSpeedPhenotype === "" ? "" : startMeanSpeedPhenotype / 10;
+        const survivorSlowAlleleFrequency =
+          survivorMeanSpeedPhenotype === "" ? "" : survivorMeanSpeedPhenotype / 10;
+
         const generationTimestamp = genRows
           .map(row => row.timestamp)
           .find(value => value) || "";
@@ -1875,8 +1907,8 @@
           timestamp: generationTimestamp,
           simulationStartTime: simulationStart,
           startPopulationSize: first.startPopulationSize,
-          startDarkAlleleFrequency: first.startDarkAlleleFrequency,
-          startSlowAlleleFrequency: first.startSlowAlleleFrequency,
+          startDarkAlleleFrequencyParameter: first.startDarkAlleleFrequency,
+          startSlowAlleleFrequencyParameter: first.startSlowAlleleFrequency,
           huntTime: first.huntTime,
           speedMultiplier: first.speedMultiplier,
           mutationRate: first.mutationRate,
@@ -1884,10 +1916,14 @@
           totalMice,
           survivors,
           miceEaten,
-          meanDarkAlleleFrequency,
-          meanSlowAlleleFrequency,
-          meanColorPhenotype,
-          meanSpeedPhenotype
+          startDarkAlleleFrequency,
+          survivorDarkAlleleFrequency,
+          startSlowAlleleFrequency,
+          survivorSlowAlleleFrequency,
+          startMeanColorPhenotype,
+          survivorMeanColorPhenotype,
+          startMeanSpeedPhenotype,
+          survivorMeanSpeedPhenotype
         };
       });
 
@@ -1898,8 +1934,8 @@
         "timestamp",
         "simulationStartTime",
         "startPopulationSize",
-        "startDarkAlleleFrequency",
-        "startSlowAlleleFrequency",
+        "startDarkAlleleFrequencyParameter",
+        "startSlowAlleleFrequencyParameter",
         "huntTime",
         "speedMultiplier",
         "mutationRate",
@@ -1907,10 +1943,14 @@
         "totalMice",
         "survivors",
         "miceEaten",
-        "meanDarkAlleleFrequency",
-        "meanSlowAlleleFrequency",
-        "meanColorPhenotype",
-        "meanSpeedPhenotype"
+        "startDarkAlleleFrequency",
+        "survivorDarkAlleleFrequency",
+        "startSlowAlleleFrequency",
+        "survivorSlowAlleleFrequency",
+        "startMeanColorPhenotype",
+        "survivorMeanColorPhenotype",
+        "startMeanSpeedPhenotype",
+        "survivorMeanSpeedPhenotype"
       ];
 
       const csv = [
