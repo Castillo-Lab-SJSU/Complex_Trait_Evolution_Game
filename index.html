@@ -1833,248 +1833,94 @@
     }
 
     async function downloadSelectedComplexSimulationData() {
-      const filters = getComplexDownloadFilters();
-      const selectedSimulation = document.getElementById("downloadSimulationSelect").value;
+      const filters=getComplexDownloadFilters();
+      const sim=document.getElementById("downloadSimulationSelect").value;
+      if(!filters.studentId){alert("Enter your student ID first.");return;}
+      if(!sim){alert("Load and select a simulation first.");return;}
+      const all=await fetchClassData();
+      const rows=all.filter(r=>String(r.simulationId||"").trim()===String(sim).trim());
+      if(!rows.length){alert("No data found for that simulation.");return;}
 
-      if (!filters.studentId) {
-        alert("Enter your student ID first.");
-        return;
-      }
+      const num=v=>{
+        if(v===undefined||v===null||String(v).trim()==="")return null;
+        const n=Number(v); return Number.isNaN(n)?null:n;
+      };
+      const avg=x=>{
+        x=x.filter(v=>v!==null&&!Number.isNaN(v));
+        return x.length?x.reduce((s,v)=>s+v,0)/x.length:"";
+      };
+      const phenotype=(r,p)=>{
+        const direct=num(r[p==="C"?"colorPhenotype":"speedPhenotype"]);
+        if(direct!==null)return direct;
+        const x=[1,2,3,4,5].map(i=>num(r[p+i]));
+        return x.every(v=>v!==null)?x.reduce((s,v)=>s+v,0):null;
+      };
 
-      if (!selectedSimulation) {
-        alert("Load and select a simulation first.");
-        return;
-      }
+      const gens=[...new Set(rows.map(r=>num(r.generation)).filter(v=>v!==null))].sort((x,y)=>x-y);
+      const out=gens.map(g=>{
+        const gr=rows.filter(r=>num(r.generation)===g);
+        const first=gr[0];
 
-      const rows = await fetchClassData();
-      const matches = rows
-        .filter(row => myComplexDataMatchesFilters(row, filters))
-        .filter(row => String(row.simulationId || "").trim() === String(selectedSimulation).trim())
-        .sort((a,b) => Number(a.generation) - Number(b.generation));
-
-      if (matches.length === 0) {
-        alert("No data found for that simulation.");
-        return;
-      }
-
-      function rowValue(row, names) {
-        const entries = Object.keys(row).map(key => ({
-          normalizedKey: String(key).toLowerCase().replace(/[^a-z0-9]/g, ""),
-          value: row[key]
-        }));
-
-        for (const name of names) {
-          const target = String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
-
-          const exact = entries.find(entry => entry.normalizedKey === target);
-          if (exact) return exact.value;
-
-          const suffix = entries.find(entry => entry.normalizedKey.endsWith(target));
-          if (suffix) return suffix.value;
-        }
-        return undefined;
-      }
-
-      function numberOrBlank(value) {
-        if (value === undefined || value === null || String(value).trim() === "") return "";
-        const n = Number(value);
-        return Number.isNaN(n) ? "" : n;
-      }
-
-      const simulationStart = (() => {
-        const explicit = matches
-          .map(row => rowValue(row, ["simulationStartTime"]))
-          .filter(Boolean)
-          .map(value => new Date(value))
-          .filter(date => !Number.isNaN(date.getTime()))
-          .sort((a,b) => a-b);
-
-        if (explicit.length) return explicit[0].toISOString();
-
-        const times = matches
-          .map(row => rowValue(row, ["timestamp"]))
-          .filter(Boolean)
-          .map(value => new Date(value))
-          .filter(date => !Number.isNaN(date.getTime()))
-          .sort((a,b) => a-b);
-
-        return times.length ? times[0].toISOString() : "";
-      })();
-
-      const summaryRows = matches.map(row => {
-        const startPopulationSize =
-          numberOrBlank(rowValue(row, ["startPopulationSize"]));
-
-        // In the published generation-summary sheet, survived is the mean of
-        // the 0/1 mouse-level survival values, i.e. the survival proportion.
-        const survivalProportion =
-          numberOrBlank(rowValue(row, ["survived", "survivalProportion"]));
-
-        const totalMice = startPopulationSize === "" ? "" : startPopulationSize;
-
-        const survivors =
-          totalMice === "" || survivalProportion === ""
-            ? ""
-            : Math.round(totalMice * survivalProportion);
-
-        const miceEaten =
-          totalMice === "" || survivors === ""
-            ? ""
-            : totalMice - survivors;
-
-        // Existing generation-summary rows already contain the mean phenotype
-        // of the complete starting population.
-        let startMeanColorPhenotype =
-          numberOrBlank(rowValue(row, ["colorPhenotype", "meanColorPhenotype"]));
-
-        let startMeanSpeedPhenotype =
-          numberOrBlank(rowValue(row, ["speedPhenotype", "meanSpeedPhenotype"]));
-
-        // Fallback for older summaries that only contain mean locus counts.
-        if (startMeanColorPhenotype === "") {
-          const loci = [1,2,3,4,5].map(i =>
-            numberOrBlank(rowValue(row, [`C${i}`]))
+        // The source contains 50 mouse rows plus a generation-summary row.
+        // Keep only true mouse rows. A valid survived value must be 0 or 1.
+        let mice=gr.filter(r=>{
+          const s=num(r.survived);
+          return (s===0||s===1) && (
+            num(r.mouse)!==null || phenotype(r,"C")!==null || phenotype(r,"S")!==null
           );
-          if (loci.every(v => v !== "")) {
-            startMeanColorPhenotype = loci.reduce((a,b) => a+b, 0);
-          }
+        });
+
+        // Older exports can omit survived on mouse rows. In that case identify
+        // mice from phenotype/genotype fields, excluding any aggregate row.
+        if(!mice.length){
+          mice=gr.filter(r=>
+            num(r.mouse)!==null ||
+            num(r.C1)!==null || num(r.S1)!==null ||
+            num(r.colorPhenotype)!==null || num(r.speedPhenotype)!==null
+          ).filter(r=>{
+            const s=num(r.survived);
+            return s===null || s===0 || s===1;
+          });
         }
 
-        if (startMeanSpeedPhenotype === "") {
-          const loci = [1,2,3,4,5].map(i =>
-            numberOrBlank(rowValue(row, [`S${i}`]))
-          );
-          if (loci.every(v => v !== "")) {
-            startMeanSpeedPhenotype = loci.reduce((a,b) => a+b, 0);
-          }
-        }
-
-        // For runs created with this updated version, the source data includes
-        // mean survivor-weighted contributions. Dividing by survival proportion
-        // gives the phenotype mean among survivors.
-        const survivorColorContribution =
-          numberOrBlank(rowValue(row, [
-            "survivorColorPhenotypeContribution",
-            "meanSurvivorColorPhenotypeContribution"
-          ]));
-
-        const survivorSpeedContribution =
-          numberOrBlank(rowValue(row, [
-            "survivorSpeedPhenotypeContribution",
-            "meanSurvivorSpeedPhenotypeContribution"
-          ]));
-
-        const survivorMeanColorPhenotype =
-          survivalProportion !== "" &&
-          survivalProportion > 0 &&
-          survivorColorContribution !== ""
-            ? survivorColorContribution / survivalProportion
-            : "";
-
-        const survivorMeanSpeedPhenotype =
-          survivalProportion !== "" &&
-          survivalProportion > 0 &&
-          survivorSpeedContribution !== ""
-            ? survivorSpeedContribution / survivalProportion
-            : "";
-
-        const startDarkAlleleFrequency =
-          startMeanColorPhenotype === "" ? "" : startMeanColorPhenotype / 10;
-
-        const survivorDarkAlleleFrequency =
-          survivorMeanColorPhenotype === "" ? "" : survivorMeanColorPhenotype / 10;
-
-        const startSlowAlleleFrequency =
-          startMeanSpeedPhenotype === "" ? "" : startMeanSpeedPhenotype / 10;
-
-        const survivorSlowAlleleFrequency =
-          survivorMeanSpeedPhenotype === "" ? "" : survivorMeanSpeedPhenotype / 10;
+        const surv=mice.filter(r=>num(r.survived)===1);
+        const mc0=avg(mice.map(r=>phenotype(r,"C")));
+        const mc1=avg(surv.map(r=>phenotype(r,"C")));
+        const ms0=avg(mice.map(r=>phenotype(r,"S")));
+        const ms1=avg(surv.map(r=>phenotype(r,"S")));
 
         return {
-          studentId: rowValue(row, ["studentId"]) || "",
-          simulationId: rowValue(row, ["simulationId"]) || "",
-          generation: numberOrBlank(rowValue(row, ["generation"])),
-          timestamp: rowValue(row, ["timestamp"]) || "",
-          simulationStartTime: simulationStart,
-          startPopulationSize,
-          startDarkAlleleFrequencyParameter:
-            numberOrBlank(rowValue(row, ["startDarkAlleleFrequency"])),
-          startSlowAlleleFrequencyParameter:
-            numberOrBlank(rowValue(row, ["startSlowAlleleFrequency"])),
-          huntTime: numberOrBlank(rowValue(row, ["huntTime"])),
-          speedMultiplier: numberOrBlank(rowValue(row, ["speedMultiplier"])),
-          mutationRate: numberOrBlank(rowValue(row, ["mutationRate"])),
-          habitatType: rowValue(row, ["habitatType"]) || "",
-          totalMice,
-          survivors,
-          miceEaten,
-          startDarkAlleleFrequency,
-          survivorDarkAlleleFrequency,
-          startSlowAlleleFrequency,
-          survivorSlowAlleleFrequency,
-          startMeanColorPhenotype,
-          survivorMeanColorPhenotype,
-          startMeanSpeedPhenotype,
-          survivorMeanSpeedPhenotype
+          studentId:first.studentId||"",simulationId:first.simulationId||"",generation:g,
+          timestamp:first.timestamp||"",simulationStartTime:first.simulationStartTime||rows[0].timestamp||"",
+          startPopulationSize:first.startPopulationSize||"",
+          startDarkAlleleFrequencyParameter:first.startDarkAlleleFrequency||"",
+          startSlowAlleleFrequencyParameter:first.startSlowAlleleFrequency||"",
+          huntTime:first.huntTime||"",speedMultiplier:first.speedMultiplier||"",
+          mutationRate:first.mutationRate||"",habitatType:first.habitatType||"",
+          totalMice:mice.length,survivors:surv.length,miceEaten:mice.length-surv.length,
+          startDarkAlleleFrequency:mc0===""?"":mc0/10,
+          survivorDarkAlleleFrequency:mc1===""?"":mc1/10,
+          startSlowAlleleFrequency:ms0===""?"":ms0/10,
+          survivorSlowAlleleFrequency:ms1===""?"":ms1/10,
+          startMeanColorPhenotype:mc0,survivorMeanColorPhenotype:mc1,
+          startMeanSpeedPhenotype:ms0,survivorMeanSpeedPhenotype:ms1
         };
       });
 
-      const headers = [
-        "studentId",
-        "simulationId",
-        "generation",
-        "timestamp",
-        "simulationStartTime",
-        "startPopulationSize",
-        "startDarkAlleleFrequencyParameter",
-        "startSlowAlleleFrequencyParameter",
-        "huntTime",
-        "speedMultiplier",
-        "mutationRate",
-        "habitatType",
-        "totalMice",
-        "survivors",
-        "miceEaten",
-        "startDarkAlleleFrequency",
-        "survivorDarkAlleleFrequency",
-        "startSlowAlleleFrequency",
-        "survivorSlowAlleleFrequency",
-        "startMeanColorPhenotype",
-        "survivorMeanColorPhenotype",
-        "startMeanSpeedPhenotype",
-        "survivorMeanSpeedPhenotype"
-      ];
-
-      const csv = [
-        headers.join(","),
-        ...summaryRows.map(row =>
-          headers.map(header => csvEscape(row[header])).join(",")
-        )
-      ].join("\n");
-
-      const timestampPrefix = simulationStartFilenamePrefix(matches);
-
-      const filename =
-        `${timestampPrefix}` +
-        `${filters.studentId}_` +
-        `${filters.populationSize}pop_` +
-        `${formatNumberForFilename(filters.darkFrequency)}Darkf_` +
-        `${formatNumberForFilename(filters.slowFrequency)}Slowf_` +
-        `${formatNumberForFilename(filters.speedMultiplier)}Speed_` +
-        `${filters.mutationRate}mutation_` +
-        `summary_` +
-        `${selectedSimulation}.csv`;
-
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = filename;
-      link.click();
-
-      URL.revokeObjectURL(url);
+      const headers=["studentId","simulationId","generation","timestamp","simulationStartTime",
+      "startPopulationSize","startDarkAlleleFrequencyParameter","startSlowAlleleFrequencyParameter",
+      "huntTime","speedMultiplier","mutationRate","habitatType","totalMice","survivors","miceEaten",
+      "startDarkAlleleFrequency","survivorDarkAlleleFrequency","startSlowAlleleFrequency",
+      "survivorSlowAlleleFrequency","startMeanColorPhenotype","survivorMeanColorPhenotype",
+      "startMeanSpeedPhenotype","survivorMeanSpeedPhenotype"];
+      const csv=[headers.join(","),...out.map(r=>headers.map(h=>csvEscape(r[h])).join(","))].join("\n");
+      const filename=simulationStartFilenamePrefix(rows)+`${filters.studentId}_${filters.populationSize}pop_`+
+        `${formatNumberForFilename(filters.darkFrequency)}Darkf_${formatNumberForFilename(filters.slowFrequency)}Slowf_`+
+        `${formatNumberForFilename(filters.speedMultiplier)}Speed_${filters.mutationRate}mutation_summary_${sim}.csv`;
+      const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),link=document.createElement("a");
+      link.href=url;link.download=filename;link.click();URL.revokeObjectURL(url);
     }
+
 
 
     function completedComplexRunRows(rows) {
