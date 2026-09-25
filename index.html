@@ -1042,8 +1042,13 @@
       };
       const offspring = [];
       while (offspring.length < populationSize) {
-        const p1 = randomChoice(survivors);
-        const p2 = randomChoice(survivors);
+        const p1Index = Math.floor(Math.random() * survivors.length);
+        let p2Index = Math.floor(Math.random() * (survivors.length - 1));
+        if (p2Index >= p1Index) p2Index++;
+
+        const p1 = survivors[p1Index];
+        const p2 = survivors[p2Index];
+
         offspring.push({
           colorGenotype: makeOffspringComplexGenotype(p1.colorGenotype, p2.colorGenotype, colorLoci),
           speedGenotype: makeOffspringComplexGenotype(p1.speedGenotype, p2.speedGenotype, speedLoci),
